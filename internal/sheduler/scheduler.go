@@ -74,3 +74,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		}
 	}
 }
+
+func (s *Scheduler) Submit(job *Item) error{
+	return nil
+}

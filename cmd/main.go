@@ -3,6 +3,8 @@ package main
 import (
 	"conduit/internal/sheduler"
 	"context"
+	"http"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -30,6 +32,16 @@ func main(){
 		cancel()
 	}()
 
+	// создаём хэндлер от шедулера
+	// регистрируем ручки в хэндлер
+	handler := http.NewHTTPHandler(scheduler)
+	http.HandleFunc("/postJob", handler.EnqueueJob)
+
+	// запускаем сервер
+	go http.ListenAndServe(":8080", nil)
+
 	// при необходимости обернуть в ошибку и вернуть результат
 	scheduler.Run(ctx)
+
+	// http-server graceful shutdown
 }
