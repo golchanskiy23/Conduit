@@ -29,6 +29,7 @@ func (handler *JobHandler) EnqueueJob(writer http.ResponseWriter,r *http.Respons
 	job := &sheduler.Item{
 		JobID: response.JobID,
 		Priority: response.Priority,
+		EnqueuedAt: response.EnqueuedAt,
 	}
 
 	// обработка ошибок - подумать над кастомными типами и вариациями
