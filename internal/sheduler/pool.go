@@ -33,6 +33,7 @@ func (pool *WorkerPool) Worker(ctx context.Context){
 	}
 }
 
+// обработка "ошибок" вроде блокировки на полной очереди
 func (pool *WorkerPool) Execute(job *Item){
 	pool.Jobs <- job
 }

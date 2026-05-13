@@ -8,8 +8,8 @@ import (
 
 type Scheduler struct {
 	pq             *PriorityQueue
-	delayed        DelayedQueue // interface stub
-	dependecyGraph DAG          // interface stub
+	delayed        *DelayedQueue // interface stub
+	dependecyGraph DAG          // interface stub before handler impl
 	wp             *WorkerPool
 
 	mu          sync.Mutex
@@ -19,7 +19,7 @@ type Scheduler struct {
 func NewScheduler(pool *WorkerPool) *Scheduler{
 	return &Scheduler{
 		pq: &PriorityQueue{},
-		delayed: DelayedQueue{},
+		delayed: &DelayedQueue{},
 		dependecyGraph: DAG{},
 		wp: &WorkerPool{},
 		mu: sync.Mutex{},
