@@ -75,6 +75,34 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) Submit(job *Item) error{
+func (s *Scheduler) enqueue(job *Item, t time.Time){
+	if t.After(time.Now()){
+		delayedItem := &DelayedItem{
+			Item: job,
+			RunAt: t,
+		}
+		s.delayed.Add(delayedItem)
+
+		select{
+		// канал блокируется, сигнал Run() пересчитать Next()
+		case s.wakeChannel <- struct{}{}:
+		default:
+		}
+	} else{
+		s.pq.Push(job.JobID, job.Priority)
+	}
+}
+
+func (s *Scheduler) Submit(job *Item, items []string, time time.Time) error{
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.dependecyGraph.Add(job.JobID, items); err != nil{
+		return err
+	}
+
+	if len(items) == 0{
+		s.enqueue(job, time)
+	}
+
 	return nil
 }

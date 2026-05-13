@@ -74,3 +74,9 @@ func (dq *DelayedQueue) Next() (time.Duration, error){
 	}
 	return time.Until(dq.heap[0].RunAt), nil
 }
+
+func (dq *DelayedQueue) Add(item *DelayedItem){
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	heap.Push(&dq.heap, item)
+}

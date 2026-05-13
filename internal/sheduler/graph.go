@@ -1,3 +1,7 @@
 package sheduler
 
-type DAG struct{}
+type DAG struct{
+
+}
+
+

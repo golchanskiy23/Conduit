@@ -14,7 +14,8 @@ type JobHandler struct{
 type EnqueueResponse struct{
 	JobID      string `json:"job_id"`
 	Priority   int `json:"priority"`
-	EnqueuedAt time.Time `json:"enqueued_at"`
+	RunAt time.Time `json:"run_at"`
+	Indegree []string `json:"indegree"`
 }
 
 // через scheduler вызываем функцию добавления Item в граф и детекцию цикла
@@ -29,11 +30,11 @@ func (handler *JobHandler) EnqueueJob(writer http.ResponseWriter,r *http.Respons
 	job := &sheduler.Item{
 		JobID: response.JobID,
 		Priority: response.Priority,
-		EnqueuedAt: response.EnqueuedAt,
+		EnqueuedAt: time.Now(),
 	}
 
 	// обработка ошибок - подумать над кастомными типами и вариациями
-	if err := handler.scheduler.Submit(job); err != nil{
+	if err := handler.scheduler.Submit(job, response.Indegree, response.RunAt); err != nil{
 		http.Error(writer, "error during submitting item", http.StatusInternalServerError)
 	}
 
