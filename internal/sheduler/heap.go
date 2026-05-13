@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+var ErrEmptyQueue = errors.New("priority queue is empty")
+var ErrConversation = errors.New("error in type conversation")
+
 type Item struct {
 	JobID      string
 	Priority   int
@@ -77,9 +80,6 @@ func (h *PriorityQueue) Push(jobID string, priority int) *Item {
 	heap.Push(&h.heap, val)
 	return val
 }
-
-var ErrEmptyQueue = errors.New("priority queue is empty")
-var ErrConversation = errors.New("error in type conversation")
 
 func (h *PriorityQueue) Pop() (*Item, error) {
 	h.mu.Lock()

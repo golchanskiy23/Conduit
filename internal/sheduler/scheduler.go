@@ -8,16 +8,27 @@ import (
 
 type Scheduler struct {
 	pq             *PriorityQueue
-	delayed        DelayedQueue // interface stub
-	dependecyGraph DAG          // interface stub
-	wp             WorkerPool   // interface stub
+	delayed        *DelayedQueue // interface stub
+	dependecyGraph DAG          // interface stub before handler impl
+	wp             *WorkerPool
 
 	mu          sync.Mutex
 	wakeChannel chan struct{}
 }
 
+func NewScheduler(pool *WorkerPool) *Scheduler{
+	return &Scheduler{
+		pq: &PriorityQueue{},
+		delayed: &DelayedQueue{},
+		dependecyGraph: DAG{},
+		wp: &WorkerPool{},
+		mu: sync.Mutex{},
+		wakeChannel: make(chan struct{}),
+	}
+}
+
 // возвращать ошибку?
-func (s *Scheduler) run(ctx context.Context) {
+func (s *Scheduler) Run(ctx context.Context) {
 	for{
 		// забираем из delayed слайс задач -> помещаем в priority
 		jobs := s.delayed.Poll(time.Now())
@@ -31,7 +42,7 @@ func (s *Scheduler) run(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			s.wp.Execute(item.JobID)
+			s.wp.Execute(item)
 		}
 
 		// смотрим время до следуюЗщей задачи в delayed: если очередь пуста -
@@ -49,6 +60,8 @@ func (s *Scheduler) run(ctx context.Context) {
 		select {
 			case <-ctx.Done():
 				// context cancelled output
+				timer.Stop()
+				s.wp.Shutdown()
 				return 
 
 			case <- timer.C: // истечение таймера
