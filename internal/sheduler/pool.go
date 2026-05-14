@@ -9,14 +9,15 @@ import (
 type WorkerPool struct{
 	Jobs chan *Item
 	Wg sync.WaitGroup
-
+	onDone func(string)
 	// это какая-то функция выполнения воркера
 	toExecution func(context.Context, *Item) error
 }
 
-func NewWorkerPool(size int) *WorkerPool{
+func NewWorkerPool(size int, onDone func(string)) *WorkerPool{
 	return &WorkerPool{
 		Jobs: make(chan *Item, size),
+		onDone: onDone,
 	}
 }
 
@@ -30,6 +31,7 @@ func (pool *WorkerPool) Worker(ctx context.Context){
 		if err != nil{
 			// выводим ошибку или прокидываем выше
 		}
+		pool.onDone(job.JobID)
 	}
 }
 

@@ -15,7 +15,10 @@ import (
 func main(){
 	// size брать из конфигурации
 	// пересчитать позже размеры
-	pool := sheduler.NewWorkerPool(100)
+	scheduler := sheduler.NewScheduler()
+
+	pool := sheduler.NewWorkerPool(100, scheduler.OnDone)
+	scheduler.SetPool(pool)
 	// нужно отменить контекст при получении сигнала от ОС
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -24,7 +27,6 @@ func main(){
 		go pool.Worker(ctx)
 	}
 
-	scheduler := sheduler.NewScheduler(pool)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func(){

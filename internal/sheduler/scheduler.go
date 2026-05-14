@@ -11,20 +11,26 @@ type Scheduler struct {
 	delayed        *DelayedQueue // interface stub
 	dependecyGraph DAG          // interface stub before handler impl
 	wp             *WorkerPool
+	registry map[string]*Item
 
 	mu          sync.Mutex
 	wakeChannel chan struct{}
 }
 
-func NewScheduler(pool *WorkerPool) *Scheduler{
+func NewScheduler() *Scheduler{
 	return &Scheduler{
 		pq: &PriorityQueue{},
 		delayed: &DelayedQueue{},
 		dependecyGraph: DAG{},
-		wp: &WorkerPool{},
+		wp: nil,
+		registry: make(map[string]*Item),
 		mu: sync.Mutex{},
 		wakeChannel: make(chan struct{}),
 	}
+}
+
+func (s *Scheduler) SetPool(wp *WorkerPool){
+	s.wp = wp
 }
 
 // возвращать ошибку?
@@ -93,16 +99,33 @@ func (s *Scheduler) enqueue(job *Item, t time.Time){
 	}
 }
 
-func (s *Scheduler) Submit(job *Item, items []string, time time.Time) error{
+func (s *Scheduler) Submit(job *Item, items []string, RunAt time.Time) error{
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.registry[job.JobID] = job
+
 	if err := s.dependecyGraph.Add(job.JobID, items); err != nil{
 		return err
 	}
 
 	if len(items) == 0{
-		s.enqueue(job, time)
+		s.enqueue(job, RunAt)
 	}
 
 	return nil
+}
+
+func (s *Scheduler) OnDone(id string){
+	s.mu.Lock()
+    defer s.mu.Unlock()
+
+    unlocked := s.dependecyGraph.OnComplete(id)
+    for _, jobID := range unlocked {
+        job := s.registry[jobID]
+		// как-то перелать RunAt
+        s.enqueue(job, job.EnqueuedAt)
+    }
+
+    delete(s.registry, id) 
 }
