@@ -11,16 +11,22 @@ type JobHandler struct{
 	scheduler *sheduler.Scheduler
 }
 
-type EnqueueResponse struct{
+func NewHTTPHandler(s *sheduler.Scheduler) *JobHandler{
+	return &JobHandler{
+		scheduler: s,
+	}
+}
+
+type EnqueueRequest struct{
 	JobID      string `json:"job_id"`
-	Priority   int `json:"priority"`
+	Priority   sheduler.Priority `json:"priority"`
 	RunAt time.Time `json:"run_at"`
 	Indegree []string `json:"indegree"`
 }
 
 // через scheduler вызываем функцию добавления Item в граф и детекцию цикла
-func (handler *JobHandler) EnqueueJob(writer http.ResponseWriter,r *http.Response){
-	var response EnqueueResponse
+func (handler *JobHandler) EnqueueJob(writer http.ResponseWriter,r *http.Request){
+	var response EnqueueRequest
 	if err := json.NewDecoder(r.Body).Decode(&response); err != nil{
 		http.Error(writer, "error in decoding input", http.StatusBadRequest)
 		return

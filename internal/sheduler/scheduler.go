@@ -4,26 +4,31 @@ import (
 	"context"
 	"sync"
 	"time"
+	cfg "conduit/config"
 )
-
-type schedulerOptions struct{
-	execute func(context.Context, *Item) error
-	cfg WorkerPoolConfig
-	onError func(string, error)
-}
 
 type Scheduler struct {
 	pq             *PriorityQueue
 	delayed        *DelayedQueue
 	dependecyGraph *DAG
-	wp             *WorkerPool
+	Pool             *workerPool
 	registry map[string]*Item
+	cfg *cfg.Config
 
 	mu          sync.Mutex
 	wakeChannel chan struct{}
 	done        chan error
 }
 
+func (s *Scheduler) execute(ctx context.Context, item *Item) error{
+	return nil
+}
+
+func (s *Scheduler) onError(string, error){
+
+}
+
+// как передавать cfg в NewScheduler?
 func NewScheduler(options ...Option) *Scheduler{
 	s := &Scheduler{
 		pq: NewPriorityQueue(),
@@ -40,9 +45,13 @@ func NewScheduler(options ...Option) *Scheduler{
 		opt(so)
 	}
 
-	s.wp = newWorkerPool(cfg.Pool, execute, s.OnDone, s.onError)
+	s.Pool = newWorkerPool(cfg.Pool, s.execute, s.OnDone, s.onError)
 
 	return s
+}
+
+func (s *Scheduler) Wait() error {
+    return <- s.done // chan error, закрывается в Run перед return
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -50,7 +59,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		// забираем из delayed слайс задач -> помещаем в priority
 		jobs := s.delayed.Poll(time.Now())
 		for _, job := range jobs {
-			s.pq.Push(job.Item.JobID, job.Item.Priority)
+			s.pq.Push(job.JobID, job.Priority)
 		}
 
 		// из priority помещаем в worker pool
@@ -59,7 +68,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			s.wp.Execute(item)
+			s.Pool.Execute(item)
 		}
 
 		// смотрим время до следуюЗщей задачи в delayed: если очередь пуста -
@@ -78,8 +87,9 @@ func (s *Scheduler) Run(ctx context.Context) {
 			case <-ctx.Done():
 				// context cancelled output
 				timer.Stop()
-				s.wp.Shutdown()
-				return 
+				// нужно ли передавать если context завершился
+				s.Pool.Shutdown(ctx)
+				return
 
 			case <- timer.C: // истечение таймера
 			case <- s.wakeChannel:
@@ -92,22 +102,16 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) enqueue(job *Item, t time.Time){
-	if t.After(time.Now()){
-		delayedItem := &DelayedItem{
-			Item: job,
-			RunAt: t,
-		}
-		s.delayed.Add(delayedItem)
-
-		select{
-		// канал блокируется, сигнал Run() пересчитать Next()
-		case s.wakeChannel <- struct{}{}:
-		default:
-		}
-	} else{
-		s.pq.Push(job.JobID, job.Priority)
-	}
+func (s *Scheduler) enqueue(job *Item) {
+    if job.RunAt.After(time.Now()) {
+        s.delayed.Add(job)
+        select {
+        case s.wakeChannel <- struct{}{}:
+        default:
+        }
+    } else {
+        s.pq.Push(job.JobID, job.Priority)
+    }
 }
 
 func (s *Scheduler) Submit(job *Item, items []string, RunAt time.Time) error{
@@ -121,7 +125,7 @@ func (s *Scheduler) Submit(job *Item, items []string, RunAt time.Time) error{
 	}
 
 	if len(items) == 0{
-		s.enqueue(job, RunAt)
+		s.enqueue(job)
 	}
 
 	return nil
@@ -134,8 +138,7 @@ func (s *Scheduler) OnDone(id string){
     unlocked := s.dependecyGraph.OnComplete(id)
     for _, jobID := range unlocked {
         job := s.registry[jobID]
-		// как-то перелать RunAt
-        s.enqueue(job, job.EnqueuedAt)
+        s.enqueue(job)
     }
 
     delete(s.registry, id) 

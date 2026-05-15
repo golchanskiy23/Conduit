@@ -4,6 +4,12 @@ import(
 	"context"
 )
 
+type schedulerOptions struct{
+	execute func(context.Context, *Item) error
+	cfg WorkerPoolConfig
+	onError func(string, error)
+}
+
 type Option func(*schedulerOptions)
 
 func WithExecutor(fn func(context.Context, *Item) error) Option {

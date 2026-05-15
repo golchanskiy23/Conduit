@@ -49,8 +49,7 @@ func (g *DAG) Add(id string, depends []string) error{
 	defer g.mu.Unlock()
 
 	if _, ok := g.nodes[id]; ok{
-		// return custom errror
-		return fmt.Errorf("custom already exists error")
+        return fmt.Errorf("%w : %s", ErrAlreadyExists, id)
 	}
 
 	g.nodes[id] = struct{}{}
@@ -66,8 +65,8 @@ func (g *DAG) Add(id string, depends []string) error{
 			size := len(g.Indegree[dependency])
 			g.Indegree[dependency] = g.Indegree[dependency][:size-1]
 		}
-		return ErrCyclicDependency
-	}
+        return fmt.Errorf("%w : %s", ErrCyclicDependency, id)    
+    }
 
 	return nil
 }

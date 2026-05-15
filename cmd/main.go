@@ -7,43 +7,66 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
+	"time"
+	"errors"
+	"log"
+	cfg "conduit/config"
 )
 
 
 func main(){
-	// size брать из конфигурации
-	// пересчитать позже размеры
-	scheduler := sheduler.NewScheduler()
-
-	pool := sheduler.NewWorkerPool(100, scheduler.OnDone)
-	scheduler.SetPool(pool)
-	// нужно отменить контекст при получении сигнала от ОС
+	config := &cfg.Config{}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	for i := 0; i < runtime.GOMAXPROCS(0); i++{
-		pool.Wg.Add(1)
-		go pool.Worker(ctx)
+	// добавить параметры по функциональным опциям(включая запускаемую функцию)
+	scheduler := sheduler.NewScheduler(cfg.Scheduler, executeJob)
+	scheduler.Pool.Start(ctx, cfg.WorkerCount)
+
+	mux := http.NewServeMux()
+	handler := handler.NewHTTPHandler(scheduler)
+	mux.HandleFunc("/postJob", handler.EnqueueJob)
+
+	srv := &http.Server{
+    	Addr:         ":" + cfg.Port,
+    	Handler:      mux,
+    	ReadTimeout:  5 * time.Second,
+    	WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	errCh := make(chan error, 1)
+
+	go func() {
+    	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+        	errCh <- err
+    	}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	go func(){
-		<-quit
-		cancel()
-	}()
 
-	// создаём хэндлер от шедулера
-	// регистрируем ручки в хэндлер
-	handler := handler.NewHTTPHandler(scheduler)
-	http.HandleFunc("/postJob", handler.EnqueueJob)
+	select {
+	case <-quit:
+    	log.Println("shutdown signal received")
+	case err := <-errCh:
+    	log.Printf("http server error: %v", err)
+	}
 
-	// запускаем сервер
-	go http.ListenAndServe(":8080", nil)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
 
-	// при необходимости обернуть в ошибку и вернуть результат
-	scheduler.Run(ctx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+    	log.Printf("http shutdown: %v", err)
+	}
 
-	// http-server graceful shutdown
+	cancel()
+
+	if err := scheduler.Wait(); err != nil {
+    	log.Printf("scheduler shutdown: %v", err)
+	}
+
+	signal.Stop(quit)
+	close(quit)
 }

@@ -13,33 +13,39 @@ type WorkerPoolConfig struct {
 }
 
 // добавить интерфейс, чтобы в пушить любой пул в scheduer constructor
-type WorkerPool struct{
-	Jobs chan *Item
-	Wg sync.WaitGroup
-	Cfg WorkerPoolConfig
-
-	onDone func(string)
+type workerPool struct {
+    jobs    chan *Item
+    wg      sync.WaitGroup
+    cfg     WorkerPoolConfig
+    onDone  func(string)
     onError func(string, error)
-	toExecution func(context.Context, *Item) error
+    execute func(context.Context, *Item) error
 }
 
-func newWorkerPool(cfg WorkerPoolConfig, execute func(context.Context, *Item) error, onDone func(string), onError func(string, error)) *WorkerPool {
-    return &WorkerPool{
-        Jobs:    make(chan *Item, cfg.BufferSize),
-        Cfg:     cfg,
-        toExecution: execute,
+func newWorkerPool(cfg WorkerPoolConfig, execute func(context.Context, *Item) error, onDone func(string), onError func(string, error)) *workerPool {
+    return &workerPool{
+        jobs:    make(chan *Item, cfg.BufferSize),
+        cfg:     cfg,
+        execute: execute,
         onDone:  onDone,
         onError: onError,
     }
 }
 
-func (pool *WorkerPool) Worker(ctx context.Context){
-	defer pool.Wg.Done()
-	for job := range pool.Jobs{
+func (pool *workerPool) Start(ctx context.Context, n int) {
+    for i := 0; i < n; i++ {
+        pool.wg.Add(1)
+        go pool.worker(ctx)
+    }
+}
+
+func (pool *workerPool) worker(ctx context.Context){
+	defer pool.wg.Done()
+	for job := range pool.jobs{
 		func() {
-            jobCtx, cancel := context.WithTimeout(ctx, pool.Cfg.JobTimeout)
+            jobCtx, cancel := context.WithTimeout(ctx, pool.cfg.JobTimeout)
             defer cancel()
-            if err := pool.toExecution(jobCtx, job); err != nil {
+            if err := pool.execute(jobCtx, job); err != nil {
                 pool.onError(job.JobID, err)
             }
             pool.onDone(job.JobID)
@@ -47,17 +53,17 @@ func (pool *WorkerPool) Worker(ctx context.Context){
 	}
 }
 
-func (pool *WorkerPool) Execute(job *Item){
-	pool.Jobs <- job
+func (pool *workerPool) Execute(job *Item){
+	pool.jobs <- job
 }
 
-func (pool *WorkerPool) Shutdown(ctx context.Context) error{
-	close(pool.Jobs)
+func (pool *workerPool) Shutdown(ctx context.Context) error{
+	close(pool.jobs)
 	done := make(chan struct{})
 
 	// зачем передавать параметры, если анонимной функции видно всё в этой функции?
 	go func(){
-		pool.Wg.Wait()
+		pool.wg.Wait()
 		close(done)
 	}()
 

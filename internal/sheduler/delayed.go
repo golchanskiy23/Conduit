@@ -55,7 +55,10 @@ func (dq *DelayedQueue) Poll(now time.Time) []*Item{
 
 	var ans []*Item
 	for len(dq.heap) > 0 && !dq.heap[0].RunAt.After(now){
-		top := heap.Pop(&dq.heap).(*Item)
+		top, ok := heap.Pop(&dq.heap).(*Item)
+		if !ok {
+			continue
+		}
 		ans = append(ans, top)
 	}
 
