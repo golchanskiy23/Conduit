@@ -3,7 +3,7 @@ package main
 import (
 	"conduit/internal/sheduler"
 	"context"
-	"http"
+	"conduit/handler"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,7 +36,7 @@ func main(){
 
 	// создаём хэндлер от шедулера
 	// регистрируем ручки в хэндлер
-	handler := http.NewHTTPHandler(scheduler)
+	handler := handler.NewHTTPHandler(scheduler)
 	http.HandleFunc("/postJob", handler.EnqueueJob)
 
 	// запускаем сервер

@@ -6,13 +6,7 @@ import (
 	"container/heap"
 )
 
-type DelayedItem struct {
-	Item *Item
-	RunAt time.Time
-	idx int // internal definition in delayed queue
-}
-
-type DelayedMinHeap []*DelayedItem
+type DelayedMinHeap []*Item
 
 func (h DelayedMinHeap) Less(i, j int) bool {
 	return h[i].RunAt.Before(h[j].RunAt)	
@@ -28,7 +22,7 @@ func (h DelayedMinHeap) Swap(i, j int) {
 }
 
 func (h *DelayedMinHeap) Push(x any) {
-	val, ok := x.(*DelayedItem)
+	val, ok := x.(*Item)
 	if !ok {
 		return
 	}
@@ -52,13 +46,13 @@ type DelayedQueue struct {
 	heap DelayedMinHeap
 }
 
-func (dq *DelayedQueue) Poll(now time.Time) []*DelayedItem{
+func (dq *DelayedQueue) Poll(now time.Time) []*Item{
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
 
-	var ans []*DelayedItem
+	var ans []*Item
 	for len(dq.heap) > 0 && !dq.heap[0].RunAt.After(now){
-		top := heap.Pop(&dq.heap).(*DelayedItem)
+		top := heap.Pop(&dq.heap).(*Item)
 		ans = append(ans, top)
 	}
 
@@ -75,7 +69,7 @@ func (dq *DelayedQueue) Next() (time.Duration, error){
 	return time.Until(dq.heap[0].RunAt), nil
 }
 
-func (dq *DelayedQueue) Add(item *DelayedItem){
+func (dq *DelayedQueue) Add(item *Item){
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
 	heap.Push(&dq.heap, item)

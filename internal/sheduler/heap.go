@@ -2,17 +2,23 @@ package sheduler
 
 import (
 	"container/heap"
-	"errors"
 	"sync"
 	"time"
 )
 
-var ErrEmptyQueue = errors.New("priority queue is empty")
-var ErrConversation = errors.New("error in type conversation")
+const (
+    PriorityLow      Priority = 1
+    PriorityNormal   Priority = 5
+    PriorityHigh     Priority = 10
+    PriorityCritical Priority = 100
+)
+
+type Priority int
 
 type Item struct {
 	JobID      string
-	Priority   int
+	Priority   Priority
+	RunAt time.Time
 	EnqueuedAt time.Time
 	idx        int
 }
@@ -67,7 +73,7 @@ func NewPriorityQueue() *PriorityQueue {
 	return pq
 }
 
-func (h *PriorityQueue) Push(jobID string, priority int) *Item {
+func (h *PriorityQueue) Push(jobID string, priority Priority) *Item {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -97,7 +103,7 @@ func (h *PriorityQueue) Pop() (*Item, error) {
 	return val, nil
 }
 
-func (h *PriorityQueue) Update(item *Item, newPriority int) {
+func (h *PriorityQueue) Update(item *Item, newPriority Priority) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
