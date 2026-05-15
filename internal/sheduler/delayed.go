@@ -18,7 +18,6 @@ func (h DelayedMinHeap) Len() int {
 
 func (h DelayedMinHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
-	h[i].idx, h[j].idx = i, j
 }
 
 func (h *DelayedMinHeap) Push(x any) {
@@ -27,7 +26,6 @@ func (h *DelayedMinHeap) Push(x any) {
 		return
 	}
 
-	val.idx = len(*h)
 	*h = append(*h, val)
 }
 
@@ -36,7 +34,6 @@ func (h *DelayedMinHeap) Pop() any {
 	n := len(old)
 	val := old[n-1]
 	old[n-1] = nil
-	val.idx = -1
 	*h = old[:n-1]
 	return val
 }
@@ -44,6 +41,12 @@ func (h *DelayedMinHeap) Pop() any {
 type DelayedQueue struct {
 	mu   sync.Mutex
 	heap DelayedMinHeap
+}
+
+func NewDelayedQueue() *DelayedQueue{
+	dq := &DelayedQueue{}
+	heap.Init(&dq.heap)
+	return dq
 }
 
 func (dq *DelayedQueue) Poll(now time.Time) []*Item{

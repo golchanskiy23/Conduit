@@ -6,34 +6,45 @@ import (
 	"time"
 )
 
+type schedulerOptions struct{
+	execute func(context.Context, *Item) error
+	cfg WorkerPoolConfig
+	onError func(string, error)
+}
+
 type Scheduler struct {
 	pq             *PriorityQueue
-	delayed        *DelayedQueue // interface stub
-	dependecyGraph DAG          // interface stub before handler impl
+	delayed        *DelayedQueue
+	dependecyGraph *DAG
 	wp             *WorkerPool
 	registry map[string]*Item
 
 	mu          sync.Mutex
 	wakeChannel chan struct{}
+	done        chan error
 }
 
-func NewScheduler() *Scheduler{
-	return &Scheduler{
-		pq: &PriorityQueue{},
-		delayed: &DelayedQueue{},
-		dependecyGraph: DAG{},
-		wp: nil,
+func NewScheduler(options ...Option) *Scheduler{
+	s := &Scheduler{
+		pq: NewPriorityQueue(),
+		delayed: NewDelayedQueue(),
+		dependecyGraph: NewDAG(),
+
 		registry: make(map[string]*Item),
 		mu: sync.Mutex{},
-		wakeChannel: make(chan struct{}),
+		wakeChannel: make(chan struct{}, 1),
 	}
+
+	so := &schedulerOptions{}
+	for _, opt := range options{
+		opt(so)
+	}
+
+	s.wp = newWorkerPool(cfg.Pool, execute, s.OnDone, s.onError)
+
+	return s
 }
 
-func (s *Scheduler) SetPool(wp *WorkerPool){
-	s.wp = wp
-}
-
-// возвращать ошибку?
 func (s *Scheduler) Run(ctx context.Context) {
 	for{
 		// забираем из delayed слайс задач -> помещаем в priority

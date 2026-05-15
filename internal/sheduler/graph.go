@@ -1,19 +1,24 @@
 package sheduler
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"maps"
 )
 
-var ErrCyclicDependency = errors.New("cycle has been founded")
-
 type DAG struct{
 	mu sync.Mutex
 	nodes map[string]struct{}
 	Indegree map[string][]string
-	InCnt map[string]int // сколько зависимостей осталось
+	InCnt map[string]int
+}
+
+func NewDAG() *DAG{
+    return &DAG{
+        nodes: make(map[string]struct{}),
+        Indegree: make(map[string][]string),
+	    InCnt: make(map[string]int),
+    }
 }
 
 func (d *DAG) hasCycle() bool {
