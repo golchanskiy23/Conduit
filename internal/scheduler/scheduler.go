@@ -126,29 +126,40 @@ func (s *Scheduler) enqueue(job *Item) {
 
 func (s *Scheduler) Submit(job *Item, deps []string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.registry[job.JobID] = job
 
 	if err := s.dag.Add(job.JobID, deps); err != nil {
 		delete(s.registry, job.JobID)
+        s.mu.Unlock()
 		return err
 	}
 
-	if len(deps) == 0 {
-		s.enqueue(job)
-	}
+	shouldEnqueue := len(deps) == 0
 
-	return nil
+    s.mu.Unlock()
+
+    if shouldEnqueue {
+        s.enqueue(job)
+    }
+
+    return nil
 }
 
 func (s *Scheduler) onDone(id string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	unlocked := s.dag.OnComplete(id)
-	for _, jobID := range unlocked {
-		job := s.registry[jobID]
+
+    var jobs []*Item
+    for _, id := range unlocked{
+        jobs = append(jobs, s.registry[id])
+    }
+
+    delete(s.registry, id)
+    s.mu.Unlock()
+
+	for _, job := range jobs {
 		s.enqueue(job)
 	}
 	delete(s.registry, id)
