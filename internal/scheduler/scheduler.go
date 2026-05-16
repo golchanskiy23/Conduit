@@ -40,13 +40,18 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 		done:        make(chan struct{}),
 	}
 
-	wp := newWorkerPool(cfg.PoolCfg,
-		WithExecutor(so.execute),
-		WithOnDone(s.OnDone),
-		WithOnError(so.onError),
-	)
-
-	s.pool = wp
+	if so.pool != nil {
+		s.pool = so.pool
+	} else {
+		if so.execute == nil {
+			panic("scheduler: WithTaskExecutor is required")
+		}
+		s.pool = newWorkerPool(cfg.PoolCfg,
+			WithExecutor(so.execute),
+			WithOnDone(s.OnDone),
+			WithOnError(so.onError),
+		)
+	}	
 
 	return  s
 }
@@ -116,15 +121,15 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 func (s *Scheduler) enqueue(job *Item) {
-	if job.RunAt.After(time.Now()) {
-		s.delayed.Add(job)
-		select {
-		case s.wakeChannel <- struct{}{}:
-		default:
-		}
-	} else {
-		s.pq.Push(job)
-	}
+    if job.RunAt.After(time.Now()) {
+        s.delayed.Add(job)
+    } else {
+        s.pq.Push(job)
+    }
+    select {
+    case s.wakeChannel <- struct{}{}:
+    default:
+    }
 }
 
 func (s *Scheduler) Submit(job *Item, deps []string) error {
@@ -172,5 +177,12 @@ func (s *Scheduler) OnDone(id string) {
 
 	for _, job := range jobs {
 		s.enqueue(job)
+	}
+}
+
+func (s *Scheduler) Wake() {
+	select {
+	case s.wakeChannel <- struct{}{}:
+	default:
 	}
 }
