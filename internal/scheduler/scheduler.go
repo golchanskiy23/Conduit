@@ -6,6 +6,7 @@ import (
 	"log"
 	"sync"
 	"time"
+	"fmt"
 )
 
 type Scheduler struct {
@@ -128,6 +129,11 @@ func (s *Scheduler) enqueue(job *Item) {
 
 func (s *Scheduler) Submit(job *Item, deps []string) error {
 	s.mu.Lock()
+
+	if _, ok := s.registry[job.JobID]; ok {
+        s.mu.Unlock()
+        return fmt.Errorf("%w: %s", ErrAlreadyExists, job.JobID)
+    }
 
 	s.registry[job.JobID] = job
 
