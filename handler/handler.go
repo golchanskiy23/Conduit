@@ -15,12 +15,18 @@ type Submitter interface {
 	Submit(job *scheduler.Item, deps []string) error
 }
 
+type IDGenerator func() (string, error)
+
 type JobHandler struct {
 	scheduler Submitter
+	generateID  IDGenerator
 }
 
 func NewHTTPHandler(s Submitter) *JobHandler {
-	return &JobHandler{scheduler: s}
+	return &JobHandler{
+		scheduler: s,
+		generateID: generateJobID,
+	}
 }
 
 type EnqueueRequest struct {
@@ -45,7 +51,7 @@ func (h *JobHandler) EnqueueJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID, err := generateJobID()
+	jobID, err := h.generateID()
     if err != nil {
         http.Error(w, "failed to generate job id", http.StatusInternalServerError)
         return
