@@ -1,47 +1,87 @@
 package main
 
 import (
-	"conduit/internal/sheduler"
+	"conduit/internal/scheduler"
+	"conduit/handler"
 	"context"
-	"http"
+	"log"
 	"net/http"
-	"os"
+	"time"
+	"errors"
 	"os/signal"
-	"runtime"
+	"os"
 	"syscall"
+	"conduit/config"
 )
 
+func executeJob(ctx context.Context, item *scheduler.Item) error{
+	return nil
+}
 
 func main(){
-	// size брать из конфигурации
-	// пересчитать позже размеры
-	pool := sheduler.NewWorkerPool(100)
-	// нужно отменить контекст при получении сигнала от ОС
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	for i := 0; i < runtime.GOMAXPROCS(0); i++{
-		pool.Wg.Add(1)
-		go pool.Worker(ctx)
+	// WorkerPoolConfig(buffersize, jobtimeout)
+	// WorkersNum(int <- default gomaxprocs(0))
+	// Server options
+	// Shutdown timeout (*int for nil)
+	cfg := config.NewConfig()
+	s := scheduler.NewScheduler(
+		cfg,
+		scheduler.WithTaskExecutor(executeJob),
+		scheduler.WithPoolConfig(cfg.PoolCfg),
+		scheduler.WithTaskOnError(func(id string, err error) {
+			log.Printf("job %s failed: %v", id, err)
+		}),
+	)
+
+	s.Start(ctx, cfg.WorkersNum)
+	go s.Run(ctx)
+
+	mux := http.NewServeMux()
+	h := handler.NewHTTPHandler(s)
+	mux.HandleFunc("/jobs", h.EnqueueJob)
+
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
-	scheduler := sheduler.NewScheduler(pool)
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	go func(){
-		<-quit
-		cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
 	}()
 
-	// создаём хэндлер от шедулера
-	// регистрируем ручки в хэндлер
-	handler := http.NewHTTPHandler(scheduler)
-	http.HandleFunc("/postJob", handler.EnqueueJob)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// запускаем сервер
-	go http.ListenAndServe(":8080", nil)
+	select {
+	case <-quit:
+		log.Println("shutdown signal received")
+	case err := <-errCh:
+		log.Printf("http server error: %v", err)
+	}
 
-	// при необходимости обернуть в ошибку и вернуть результат
-	scheduler.Run(ctx)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
 
-	// http-server graceful shutdown
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+
+	cancel()
+
+	/*if err := s.Wait(); err != nil {
+		log.Printf("scheduler shutdown: %v", err)
+	}*/
+	s.Wait()
+
+	signal.Stop(quit)
+	close(quit)
 }

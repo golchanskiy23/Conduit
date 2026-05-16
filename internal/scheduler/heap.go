@@ -1,18 +1,24 @@
-package sheduler
+package scheduler
 
 import (
 	"container/heap"
-	"errors"
 	"sync"
 	"time"
 )
 
-var ErrEmptyQueue = errors.New("priority queue is empty")
-var ErrConversation = errors.New("error in type conversation")
+const (
+    PriorityLow      Priority = 1
+    PriorityNormal   Priority = 5
+    PriorityHigh     Priority = 10
+    PriorityCritical Priority = 100
+)
+
+type Priority int
 
 type Item struct {
 	JobID      string
-	Priority   int
+	Priority   Priority
+	RunAt time.Time
 	EnqueuedAt time.Time
 	idx        int
 }
@@ -20,11 +26,10 @@ type Item struct {
 type MinHeap []*Item
 
 func (h MinHeap) Less(i, j int) bool {
-	if h[i].Priority != h[j].Priority {
-		return h[i].Priority < h[j].Priority
-	}
-
-	return h[i].EnqueuedAt.Before(h[j].EnqueuedAt)
+    if h[i].Priority != h[j].Priority {
+        return h[i].Priority > h[j].Priority
+    }
+    return h[i].EnqueuedAt.Before(h[j].EnqueuedAt)
 }
 
 func (h MinHeap) Len() int {
@@ -67,18 +72,11 @@ func NewPriorityQueue() *PriorityQueue {
 	return pq
 }
 
-func (h *PriorityQueue) Push(jobID string, priority int) *Item {
+func (h *PriorityQueue) Push(job *Item) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	val := &Item{
-		JobID:      jobID,
-		Priority:   priority,
-		EnqueuedAt: time.Now(),
-	}
-
-	heap.Push(&h.heap, val)
-	return val
+	heap.Push(&h.heap, job)
 }
 
 func (h *PriorityQueue) Pop() (*Item, error) {
@@ -91,13 +89,13 @@ func (h *PriorityQueue) Pop() (*Item, error) {
 
 	val, ok := heap.Pop(&h.heap).(*Item)
 	if !ok {
-		return nil, ErrConversation
+		return nil, ErrConversion
 	}
 
 	return val, nil
 }
 
-func (h *PriorityQueue) Update(item *Item, newPriority int) {
+func (h *PriorityQueue) Update(item *Item, newPriority Priority) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
