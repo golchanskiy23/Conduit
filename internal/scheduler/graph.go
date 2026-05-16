@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"fmt"
-	"maps"
 	"sync"
 )
 
@@ -21,65 +20,27 @@ func NewDAG() *DAG {
 	}
 }
 
-func hasCycle(deg map[string][]string, cnt map[string]int) bool{
-	cntClone := maps.Clone(cnt)
+func (graph *DAG) Add(id string, depends []string) error {
+    graph.mu.Lock()
+    defer graph.mu.Unlock()
 
-	var queue []string
-	for id, degree := range cntClone{
-		if degree == 0{
-			queue = append(queue, id)
-		} 
-	}
+    if _, ok := graph.nodes[id]; ok {
+        return fmt.Errorf("%w: %s", ErrAlreadyExists, id)
+    }
 
-	processed := 0
-	for len(queue) > 0{
-		size := len(queue)
-		for i := 0; i < size; i++{
-			id := queue[0]
-			queue = queue[1:]
-			processed++
-			for _, dep := range deg[id]{
-				cntClone[dep]--
-				if cntClone[dep] == 0{
-					queue = append(queue, dep)
-				}
-			}
-		}
-	}
+    for _, dep := range depends {
+        if _, ok := graph.nodes[dep]; !ok {
+            return fmt.Errorf("unknown dependency: %s", dep)
+        }
+    }
 
-	return processed != len(cnt)
-}
+    graph.nodes[id] = struct{}{}
+    graph.waitingFor[id] = len(depends)
+    for _, dep := range depends {
+        graph.dependents[dep] = append(graph.dependents[dep], id)
+    }
 
-func (graph *DAG) Add(id string, depends []string) error{
-	graph.mu.Lock()
-	defer graph.mu.Unlock()
-
-	if _, ok := graph.nodes[id]; ok{
-		return fmt.Errorf("%w: %s", ErrAlreadyExists, id)
-	}
-
-	nodesCopy := maps.Clone(graph.nodes)
-	indegreeCopy := maps.Clone(graph.dependents)
-	inCntCopy := maps.Clone((graph.waitingFor))
-
-	nodesCopy[id] = struct{}{}
-	inCntCopy[id] = len(depends)
-	for _, dep := range depends{
-		if _, ok := nodesCopy[dep]; !ok {
-			return fmt.Errorf("unknown dependency: %s", dep)
-		}
-		indegreeCopy[dep] = append(indegreeCopy[dep], id)
-	}
-
-	if hasCycle(indegreeCopy, inCntCopy){
-		return fmt.Errorf("%w: %s", ErrCyclicDependency, id)
-	}
-
-	graph.nodes = nodesCopy
-	graph.dependents = indegreeCopy
-	graph.waitingFor = inCntCopy
-
-	return nil
+    return nil
 }
 
 func (g *DAG) OnComplete(id string) []string {
