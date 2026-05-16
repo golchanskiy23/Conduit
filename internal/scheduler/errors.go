@@ -1,4 +1,4 @@
-package sheduler
+package scheduler
 
 import "errors"
 
@@ -7,4 +7,5 @@ var(
 	ErrConversation = errors.New("error in type conversation")
 	ErrCyclicDependency = errors.New("cycle has been founded")
 	ErrAlreadyExists    = errors.New("job already exists")
+	ErrPoolClosed       = errors.New("worker pool is closed")
 )
