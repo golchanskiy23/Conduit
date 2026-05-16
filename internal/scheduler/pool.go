@@ -18,6 +18,7 @@ type workerPool struct {
 	jobs    chan *Item
 	wg      sync.WaitGroup
 	cfg     config.WorkerPoolConfig
+	mu 		sync.RWMutex
 	closed  atomic.Bool
 	execute func(context.Context, *Item) error
 	onDone  func(string)
@@ -54,6 +55,11 @@ func (pool *workerPool) Start(ctx context.Context, n int) {
 func (pool *workerPool) worker(ctx context.Context) {
 	defer pool.wg.Done()
 	for job := range pool.jobs {
+		defer func() {
+			if r := recover(); r != nil {
+				pool.onError(job.JobID, fmt.Errorf("panic: %v", r))
+			}
+		}()
 		func() {
 			jobCtx, cancel := context.WithTimeout(ctx, pool.cfg.JobTimeout)
 			defer cancel()
@@ -67,6 +73,9 @@ func (pool *workerPool) worker(ctx context.Context) {
 }
 
 func (pool *workerPool) TryExecute(job *Item) bool {
+	pool.mu.RLock()
+    defer pool.mu.RUnlock()
+
 	if pool.closed.Load() {
 		return false
 	}
@@ -78,7 +87,7 @@ func (pool *workerPool) TryExecute(job *Item) bool {
 	}
 }
 
-func (pool *workerPool) Shutdown(ctx context.Context) error {
+func (pool *workerPool) Shutdown(ctx context.Context) error {	
 	pool.closed.Store(true)
 	close(pool.jobs)
 

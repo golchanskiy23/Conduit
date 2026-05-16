@@ -17,7 +17,7 @@ type Scheduler struct {
 	registry    map[string]*Item
 	mu          sync.Mutex
 	wakeChannel chan struct{}
-	done        chan error
+	done        chan struct{}
 }
 
 func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
@@ -36,7 +36,7 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 		dag:         NewDAG(),
 		registry:    make(map[string]*Item),
 		wakeChannel: make(chan struct{}, 1),
-		done:        make(chan error),
+		done:        make(chan struct{}),
 	}
 
 	if so.pool != nil {
@@ -56,8 +56,8 @@ func (s *Scheduler) Start(ctx context.Context, n int) {
 	}
 }
 
-func (s *Scheduler) Wait() error {
-	return <-s.done
+func (s *Scheduler) Wait() {
+	<-s.done
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -153,7 +153,10 @@ func (s *Scheduler) onDone(id string) {
 
     var jobs []*Item
     for _, id := range unlocked{
-        jobs = append(jobs, s.registry[id])
+        job, ok := s.registry[id]
+        if ok {
+            jobs = append(jobs, job)
+        }
     }
 
     delete(s.registry, id)

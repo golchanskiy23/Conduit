@@ -77,9 +77,10 @@ func main(){
 
 	cancel()
 
-	if err := s.Wait(); err != nil {
+	/*if err := s.Wait(); err != nil {
 		log.Printf("scheduler shutdown: %v", err)
-	}
+	}*/
+	s.Wait()
 
 	signal.Stop(quit)
 	close(quit)
