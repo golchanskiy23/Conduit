@@ -26,11 +26,11 @@ type Item struct {
 type MinHeap []*Item
 
 func (h MinHeap) Less(i, j int) bool {
-	if h[i].Priority != h[j].Priority {
-		return h[i].Priority < h[j].Priority
+	if time.Time.Equal(h[i].RunAt, h[j].RunAt) {
+		return h[i].Priority > h[j].Priority
 	}
 
-	return h[i].EnqueuedAt.Before(h[j].EnqueuedAt)
+	return h[i].RunAt.Before(h[j].RunAt)
 }
 
 func (h MinHeap) Len() int {
@@ -73,18 +73,11 @@ func NewPriorityQueue() *PriorityQueue {
 	return pq
 }
 
-func (h *PriorityQueue) Push(jobID string, priority Priority) *Item {
+func (h *PriorityQueue) Push(job *Item) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	val := &Item{
-		JobID:      jobID,
-		Priority:   priority,
-		EnqueuedAt: time.Now(),
-	}
-
-	heap.Push(&h.heap, val)
-	return val
+	heap.Push(&h.heap, job)
 }
 
 func (h *PriorityQueue) Pop() (*Item, error) {
@@ -97,7 +90,7 @@ func (h *PriorityQueue) Pop() (*Item, error) {
 
 	val, ok := heap.Pop(&h.heap).(*Item)
 	if !ok {
-		return nil, ErrConversation
+		return nil, ErrConversion
 	}
 
 	return val, nil

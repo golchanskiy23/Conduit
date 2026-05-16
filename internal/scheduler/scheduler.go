@@ -39,15 +39,15 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 		done:        make(chan struct{}),
 	}
 
-	if so.pool != nil {
-		s.pool = so.pool
-	} else {
-		s.pool = newWorkerPool(so.cfg,
-        
-        )
-	}
+	wp := newWorkerPool(cfg.PoolCfg,
+		WithExecutor(so.execute),
+		WithOnDone(s.OnDone),
+		WithOnError(so.onError),
+	)
 
-	return s
+	s.pool = wp
+
+	return  s
 }
 
 func (s *Scheduler) Start(ctx context.Context, n int) {
@@ -65,7 +65,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 	for {
 		for _, job := range s.delayed.Poll(time.Now()) {
-			s.pq.Push(job.JobID, job.Priority)
+			s.pq.Push(job)
 		}
 
 		s.mu.Lock()
@@ -89,7 +89,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		if len(overflow) > 0 {
 			s.mu.Lock()
 			for _, item := range overflow {
-				s.pq.Push(item.JobID, item.Priority)
+				s.pq.Push(item)
 			}
 			s.mu.Unlock()
 		}
@@ -103,7 +103,9 @@ func (s *Scheduler) Run(ctx context.Context) {
         select {
 		case <-ctx.Done():
 			timer.Stop()
-			s.pool.Shutdown(ctx)
+			if err := s.pool.Shutdown(ctx); err != nil {
+				log.Printf("pool shutdown: %v", err)
+			}
 			return
 		case <-timer.C:
 		case <-s.wakeChannel:
@@ -120,7 +122,7 @@ func (s *Scheduler) enqueue(job *Item) {
 		default:
 		}
 	} else {
-		s.pq.Push(job.JobID, job.Priority)
+		s.pq.Push(job)
 	}
 }
 
@@ -146,7 +148,7 @@ func (s *Scheduler) Submit(job *Item, deps []string) error {
     return nil
 }
 
-func (s *Scheduler) onDone(id string) {
+func (s *Scheduler) OnDone(id string) {
 	s.mu.Lock()
 
 	unlocked := s.dag.OnComplete(id)
@@ -165,5 +167,4 @@ func (s *Scheduler) onDone(id string) {
 	for _, job := range jobs {
 		s.enqueue(job)
 	}
-	delete(s.registry, id)
 }

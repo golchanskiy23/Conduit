@@ -65,6 +65,9 @@ func (graph *DAG) Add(id string, depends []string) error{
 	nodesCopy[id] = struct{}{}
 	inCntCopy[id] = len(depends)
 	for _, dep := range depends{
+		if _, ok := nodesCopy[dep]; !ok {
+			return fmt.Errorf("unknown dependency: %s", dep)
+		}
 		indegreeCopy[dep] = append(indegreeCopy[dep], id)
 	}
 

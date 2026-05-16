@@ -55,12 +55,12 @@ func (pool *workerPool) Start(ctx context.Context, n int) {
 func (pool *workerPool) worker(ctx context.Context) {
 	defer pool.wg.Done()
 	for job := range pool.jobs {
-		defer func() {
-			if r := recover(); r != nil {
-				pool.onError(job.JobID, fmt.Errorf("panic: %v", r))
-			}
-		}()
 		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					pool.onError(job.JobID, fmt.Errorf("panic: %v", r))
+				}
+			}()
 			jobCtx, cancel := context.WithTimeout(ctx, pool.cfg.JobTimeout)
 			defer cancel()
 			if err := pool.execute(jobCtx, job); err != nil {
@@ -88,8 +88,14 @@ func (pool *workerPool) TryExecute(job *Item) bool {
 }
 
 func (pool *workerPool) Shutdown(ctx context.Context) error {	
-	pool.closed.Store(true)
+	pool.mu.Lock()
+	if pool.closed.Swap(true){
+		pool.mu.Unlock()
+		return nil
+	}
+
 	close(pool.jobs)
+	pool.mu.Unlock()
 
 	done := make(chan struct{})
 	go func() {
