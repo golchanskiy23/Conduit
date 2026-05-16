@@ -26,11 +26,10 @@ type Item struct {
 type MinHeap []*Item
 
 func (h MinHeap) Less(i, j int) bool {
-	if time.Time.Equal(h[i].RunAt, h[j].RunAt) {
-		return h[i].Priority > h[j].Priority
-	}
-
-	return h[i].RunAt.Before(h[j].RunAt)
+    if h[i].Priority != h[j].Priority {
+        return h[i].Priority > h[j].Priority
+    }
+    return h[i].EnqueuedAt.Before(h[j].EnqueuedAt)
 }
 
 func (h MinHeap) Len() int {
