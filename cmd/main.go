@@ -1,17 +1,17 @@
 package main
 
 import (
-	"conduit/internal/scheduler"
+	"conduit/config"
 	"conduit/handler"
+	"conduit/internal/scheduler"
 	"context"
+	"errors"
 	"log"
 	"net/http"
-	"time"
-	"errors"
-	"os/signal"
 	"os"
+	"os/signal"
 	"syscall"
-	"conduit/config"
+	"time"
 )
 
 func executeJob(ctx context.Context, item *scheduler.Item) error{
@@ -19,14 +19,14 @@ func executeJob(ctx context.Context, item *scheduler.Item) error{
 }
 
 func main(){
+	cfg, err := config.NewConfig()
+	if err != nil{
+		log.Fatalf("error during get configuration: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// WorkerPoolConfig(buffersize, jobtimeout)
-	// WorkersNum(int <- default gomaxprocs(0))
-	// Server options
-	// Shutdown timeout (*int for nil)
-	cfg := config.NewConfig()
 	s := scheduler.NewScheduler(
 		cfg,
 		scheduler.WithTaskExecutor(executeJob),
