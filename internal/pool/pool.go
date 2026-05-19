@@ -1,31 +1,33 @@
-package scheduler
+package pool
 
 import (
+	"conduit/internal/config"
+	"conduit/internal/ds/queue/heap"
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
-	"conduit/config"
-	"log"
 )
 
-type WorkerPool interface {
-	TryExecute(job *Item) bool
+type WorkerPooler interface {
+	TryExecute(job *heap.Item) bool
 	Shutdown(ctx context.Context) error
+	Start(context.Context, int)
 }
 
-type workerPool struct {
-	jobs    chan *Item
-	wg      sync.WaitGroup
+type WorkerPool struct {
+	jobs    chan *heap.Item
+	wg      *sync.WaitGroup
 	cfg     config.WorkerPoolConfig
 	mu 		sync.RWMutex
 	closed  atomic.Bool
-	execute func(context.Context, *Item) error
+	execute func(context.Context, *heap.Item) error
 	onDone  func(string)
 	onError func(string, error)
 }
 
-func newWorkerPool(cfg config.WorkerPoolConfig, options ...workerOption) *workerPool {
+func NewWorkerPool(cfg config.WorkerPoolConfig, options ...workerOption) *WorkerPool {
 	opts := &workerPoolOptions{
         onError: func(id string, err error) {
             log.Printf("job %s error: %v", id, err)
@@ -36,23 +38,24 @@ func newWorkerPool(cfg config.WorkerPoolConfig, options ...workerOption) *worker
 		opt(opts)
 	}
 
-	return &workerPool{
-        jobs:    make(chan *Item, cfg.BufferSize),
+	return &WorkerPool{
+        jobs:    make(chan *heap.Item, cfg.BufferSize),
         cfg:     cfg,
+		wg:      &sync.WaitGroup{},
         execute: opts.execute,
         onDone:  opts.onDone,
         onError: opts.onError,
     }
 }
 
-func (pool *workerPool) Start(ctx context.Context, n int) {
+func (pool *WorkerPool) Start(ctx context.Context, n int) {
 	for i := 0; i < n; i++ {
 		pool.wg.Add(1)
 		go pool.worker(ctx)
 	}
 }
 
-func (pool *workerPool) worker(ctx context.Context) {
+func (pool *WorkerPool) worker(ctx context.Context) {
 	defer pool.wg.Done()
 	for job := range pool.jobs {
 		func() {
@@ -72,7 +75,7 @@ func (pool *workerPool) worker(ctx context.Context) {
 	}
 }
 
-func (pool *workerPool) TryExecute(job *Item) bool {
+func (pool *WorkerPool) TryExecute(job *heap.Item) bool {
 	pool.mu.RLock()
     defer pool.mu.RUnlock()
 
@@ -87,7 +90,7 @@ func (pool *workerPool) TryExecute(job *Item) bool {
 	}
 }
 
-func (pool *workerPool) Shutdown(ctx context.Context) error {	
+func (pool *WorkerPool) Shutdown(ctx context.Context) error {	
 	pool.mu.Lock()
 	if pool.closed.Swap(true){
 		pool.mu.Unlock()

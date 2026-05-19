@@ -1,21 +1,25 @@
 package scheduler
 
 import (
+	"conduit/internal/config"
+	"conduit/internal/ds/graph"
+	"conduit/internal/ds/queue/delayed"
+	"conduit/internal/ds/queue/heap"
+	"conduit/internal/pool"
 	"context"
-    "conduit/config"
+	"fmt"
 	"log"
 	"sync"
 	"time"
-	"fmt"
 )
 
 type Scheduler struct {
-	pq      *PriorityQueue
-	delayed *DelayedQueue
-	dag     *DAG
-	pool    WorkerPool
+	pq      *heap.PriorityQueue
+	delayed *delayed.DelayedQueue
+	dag     *graph.DAG
+	pool    pool.WorkerPooler
 
-	registry    map[string]*Item
+	registry    map[string]*heap.Item
 	mu          sync.Mutex
 	wakeChannel chan struct{}
 	done        chan struct{}
@@ -32,34 +36,29 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 	}
 
 	s := &Scheduler{
-		pq:          NewPriorityQueue(),
-		delayed:     NewDelayedQueue(),
-		dag:         NewDAG(),
-		registry:    make(map[string]*Item),
+		pq:          heap.NewPriorityQueue(),
+		delayed:     delayed.NewDelayedQueue(),
+		dag:         graph.NewDAG(),
+		registry:    make(map[string]*heap.Item),
 		wakeChannel: make(chan struct{}, 1),
 		done:        make(chan struct{}),
 	}
 
 	if so.pool != nil {
-		s.pool = so.pool
-	} else {
-		if so.execute == nil {
-			panic("scheduler: WithTaskExecutor is required")
-		}
-		s.pool = newWorkerPool(cfg.PoolCfg,
-			WithExecutor(so.execute),
-			WithOnDone(s.OnDone),
-			WithOnError(so.onError),
-		)
-	}	
+        s.pool = so.pool
+    } else {
+        s.pool = pool.NewWorkerPool(cfg.PoolCfg,
+            pool.WithExecutor(so.execute),
+            pool.WithOnDone(s.OnDone),
+            pool.WithOnError(so.onError),
+        )
+    }
 
 	return  s
 }
 
 func (s *Scheduler) Start(ctx context.Context, n int) {
-	if wp, ok := s.pool.(*workerPool); ok {
-		wp.Start(ctx, n)
-	}
+	s.pool.Start(ctx, n)
 }
 
 func (s *Scheduler) Wait() {
@@ -75,7 +74,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		}
 
 		s.mu.Lock()
-		var batch []*Item
+		var batch []*heap.Item
 		for s.pq.Len() > 0 {
 			item, err := s.pq.Pop()
 			if err != nil {
@@ -85,7 +84,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		}
 		s.mu.Unlock()
 
-		var overflow []*Item
+		var overflow []*heap.Item
 		for _, item := range batch {
 			if !s.pool.TryExecute(item) {
 				overflow = append(overflow, item)
@@ -120,7 +119,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) enqueue(job *Item) {
+func (s *Scheduler) enqueue(job *heap.Item) {
     if job.RunAt.After(time.Now()) {
         s.delayed.Add(job)
     } else {
@@ -132,12 +131,12 @@ func (s *Scheduler) enqueue(job *Item) {
     }
 }
 
-func (s *Scheduler) Submit(job *Item, deps []string) error {
+func (s *Scheduler) Submit(job *heap.Item, deps []string) error {
 	s.mu.Lock()
 
 	if _, ok := s.registry[job.JobID]; ok {
         s.mu.Unlock()
-        return fmt.Errorf("%w: %s", ErrAlreadyExists, job.JobID)
+        return fmt.Errorf("%w: %s", graph.ErrAlreadyExists, job.JobID)
     }
 
 	s.registry[job.JobID] = job
@@ -164,7 +163,7 @@ func (s *Scheduler) OnDone(id string) {
 
 	unlocked := s.dag.OnComplete(id)
 
-    var jobs []*Item
+    var jobs []*heap.Item
     for _, id := range unlocked{
         job, ok := s.registry[id]
         if ok {

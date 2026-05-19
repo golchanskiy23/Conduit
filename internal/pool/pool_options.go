@@ -1,16 +1,19 @@
-package scheduler
+package pool
 
-import "context"
+import (
+	"conduit/internal/ds/queue/heap"
+	"context"
+)
 
 type workerPoolOptions struct{
-	execute func(context.Context, *Item) error
+	execute func(context.Context, *heap.Item) error
 	onDone func(string)
 	onError func(string, error)
 }
 
 type workerOption func(*workerPoolOptions)
 
-func WithExecutor(fn func(context.Context, *Item) error) workerOption {
+func WithExecutor(fn func(context.Context, *heap.Item) error) workerOption {
     return func(o *workerPoolOptions) {
         o.execute = fn
     }

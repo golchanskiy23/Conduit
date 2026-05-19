@@ -8,17 +8,22 @@ import (
 	"testing"
 	"time"
 
-	"conduit/config"
+	"conduit/internal/config"
+	"conduit/internal/ds/graph"
+	"conduit/internal/ds/queue/heap"
+	"conduit/internal/pool"
 )
 
 type mockPool struct {
 	mu       sync.Mutex
-	executed []*Item
+	executed []*heap.Item
 	closed   bool
-	onExec   func(*Item)
+	onExec   func(*heap.Item)
 }
 
-func (m *mockPool) TryExecute(job *Item) bool {
+func (m *mockPool) Start(ctx context.Context, n int){}
+
+func (m *mockPool) TryExecute(job *heap.Item) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -38,24 +43,26 @@ func (m *mockPool) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func (m *mockPool) getExecuted() []*Item {
+func (m *mockPool) getExecuted() []*heap.Item {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := make([]*Item, len(m.executed))
+	cp := make([]*heap.Item, len(m.executed))
 	copy(cp, m.executed)
 	return cp
 }
 
 type limitedMockPool struct {
 	mu       sync.Mutex
-	executed []*Item
+	executed []*heap.Item
 	limited  bool
 	count    int
 	limit    int
-	onAccept func() // вызывается при успешном TryExecute
+	onAccept func()
 }
 
-func (l *limitedMockPool) TryExecute(job *Item) bool {
+func (m *limitedMockPool) Start(ctx context.Context, n int)       {}
+
+func (l *limitedMockPool) TryExecute(job *heap.Item) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.limited && l.count >= l.limit {
@@ -77,22 +84,22 @@ func (l *limitedMockPool) removeLimit(wake func()) {
 
 func (l *limitedMockPool) Shutdown(_ context.Context) error { return nil }
 
-func (l *limitedMockPool) getAll() []*Item {
+func (l *limitedMockPool) getAll() []*heap.Item {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	cp := make([]*Item, len(l.executed))
+	cp := make([]*heap.Item, len(l.executed))
 	copy(cp, l.executed)
 	return cp
 }
 
-func newTestScheduler(pool WorkerPool) *Scheduler {
+func newTestScheduler(pool pool.WorkerPooler) *Scheduler {
 	cfg := &config.Config{
 		PoolCfg:    config.WorkerPoolConfig{BufferSize: 10, JobTimeout: time.Second},
 		WorkersNum: 2,
 	}
 	return NewScheduler(
 		cfg,
-		WithTaskExecutor(func(ctx context.Context, item *Item) error { return nil }),
+		WithTaskExecutor(func(ctx context.Context, item *heap.Item) error { return nil }),
 		WithPool(pool),
 	)
 }
@@ -106,7 +113,7 @@ func TestScheduler_SubmitEnqueuesImmediately(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "job1", Priority: PriorityNormal}, nil)
+	s.Submit(&heap.Item{JobID: "job1", Priority: heap.PriorityNormal}, nil)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -124,9 +131,9 @@ func TestScheduler_SubmitDelayed(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{
+	s.Submit(&heap.Item{
 		JobID:    "delayed",
-		Priority: PriorityNormal,
+		Priority: heap.PriorityNormal,
 		RunAt:    time.Now().Add(100 * time.Millisecond),
 	}, nil)
 
@@ -145,10 +152,10 @@ func TestScheduler_SubmitDuplicateReturnsError(t *testing.T) {
 	mock := &mockPool{}
 	s := newTestScheduler(mock)
 
-	s.Submit(&Item{JobID: "dup"}, nil)
+	s.Submit(&heap.Item{JobID: "dup"}, nil)
 
-	err := s.Submit(&Item{JobID: "dup"}, nil)
-	if !errors.Is(err, ErrAlreadyExists) {
+	err := s.Submit(&heap.Item{JobID: "dup"}, nil)
+	if !errors.Is(err, graph.ErrAlreadyExists) {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
 }
@@ -157,7 +164,7 @@ func TestScheduler_SubmitUnknownDepReturnsError(t *testing.T) {
 	mock := &mockPool{}
 	s := newTestScheduler(mock)
 
-	err := s.Submit(&Item{JobID: "B"}, []string{"A"})
+	err := s.Submit(&heap.Item{JobID: "B"}, []string{"A"})
 	if err == nil {
 		t.Error("expected error for unknown dependency")
 	}
@@ -172,8 +179,8 @@ func TestScheduler_SubmitWithDepsNotEnqueuedImmediately(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "A"}, nil)
-	s.Submit(&Item{JobID: "B"}, []string{"A"})
+	s.Submit(&heap.Item{JobID: "A"}, nil)
+	s.Submit(&heap.Item{JobID: "B"}, []string{"A"})
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -189,7 +196,7 @@ func TestScheduler_OnDoneUnlocksDependents(t *testing.T) {
 	s := newTestScheduler(mock)
 
 	aDone := make(chan struct{})
-	mock.onExec = func(item *Item) {
+	mock.onExec = func(item *heap.Item) {
 		if item.JobID == "A" {
 			close(aDone)
 		}
@@ -200,8 +207,8 @@ func TestScheduler_OnDoneUnlocksDependents(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "A"}, nil)
-	s.Submit(&Item{JobID: "B"}, []string{"A"})
+	s.Submit(&heap.Item{JobID: "A"}, nil)
+	s.Submit(&heap.Item{JobID: "B"}, []string{"A"})
 
 	select {
 	case <-aDone:
@@ -230,7 +237,7 @@ func TestScheduler_ChainABC(t *testing.T) {
 	mock := &mockPool{}
 	s := newTestScheduler(mock)
 
-	mock.onExec = func(item *Item) {
+	mock.onExec = func(item *heap.Item) {
 		mu.Lock()
 		order = append(order, item.JobID)
 		mu.Unlock()
@@ -242,9 +249,9 @@ func TestScheduler_ChainABC(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "A"}, nil)
-	s.Submit(&Item{JobID: "B"}, []string{"A"})
-	s.Submit(&Item{JobID: "C"}, []string{"B"})
+	s.Submit(&heap.Item{JobID: "A"}, nil)
+	s.Submit(&heap.Item{JobID: "B"}, []string{"A"})
+	s.Submit(&heap.Item{JobID: "C"}, []string{"B"})
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -264,7 +271,7 @@ func TestScheduler_DiamondDependency(t *testing.T) {
 	mock := &mockPool{}
 	s := newTestScheduler(mock)
 
-	mock.onExec = func(item *Item) {
+	mock.onExec = func(item *heap.Item) {
 		count.Add(1)
 		s.OnDone(item.JobID)
 	}
@@ -274,10 +281,10 @@ func TestScheduler_DiamondDependency(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "A"}, nil)
-	s.Submit(&Item{JobID: "B"}, []string{"A"})
-	s.Submit(&Item{JobID: "C"}, []string{"A"})
-	s.Submit(&Item{JobID: "D"}, []string{"B", "C"})
+	s.Submit(&heap.Item{JobID: "A"}, nil)
+	s.Submit(&heap.Item{JobID: "B"}, []string{"A"})
+	s.Submit(&heap.Item{JobID: "C"}, []string{"A"})
+	s.Submit(&heap.Item{JobID: "D"}, []string{"B", "C"})
 
 	time.Sleep(300 * time.Millisecond)
 
@@ -318,8 +325,8 @@ func TestScheduler_OverflowRequeued(t *testing.T) {
 	go s.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	s.Submit(&Item{JobID: "job1"}, nil)
-	s.Submit(&Item{JobID: "job2"}, nil)
+	s.Submit(&heap.Item{JobID: "job1"}, nil)
+	s.Submit(&heap.Item{JobID: "job2"}, nil)
 
 	time.Sleep(150 * time.Millisecond)
 

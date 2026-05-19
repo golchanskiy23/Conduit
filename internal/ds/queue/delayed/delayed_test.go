@@ -1,6 +1,8 @@
-package scheduler
+package delayed
 
 import (
+	"conduit/internal/ds/queue"
+	"conduit/internal/ds/queue/heap"
 	"testing"
 	"time"
 )
@@ -9,8 +11,8 @@ func TestDelayedQueue_AddAndPoll(t *testing.T) {
 	dq := NewDelayedQueue()
 
 	now := time.Now()
-	past := &Item{JobID: "past", RunAt: now.Add(-time.Second)}
-	future := &Item{JobID: "future", RunAt: now.Add(time.Hour)}
+	past := &heap.Item{JobID: "past", RunAt: now.Add(-time.Second)}
+	future := &heap.Item{JobID: "future", RunAt: now.Add(time.Hour)}
 
 	dq.Add(past)
 	dq.Add(future)
@@ -36,10 +38,9 @@ func TestDelayedQueue_PollOrder(t *testing.T) {
 	dq := NewDelayedQueue()
 	now := time.Now()
 
-	// добавляем в обратном порядке
-	dq.Add(&Item{JobID: "third", RunAt: now.Add(-time.Second)})
-	dq.Add(&Item{JobID: "first", RunAt: now.Add(-3 * time.Second)})
-	dq.Add(&Item{JobID: "second", RunAt: now.Add(-2 * time.Second)})
+	dq.Add(&heap.Item{JobID: "third", RunAt: now.Add(-time.Second)})
+	dq.Add(&heap.Item{JobID: "first", RunAt: now.Add(-3 * time.Second)})
+	dq.Add(&heap.Item{JobID: "second", RunAt: now.Add(-2 * time.Second)})
 
 	ready := dq.Poll(now)
 	if len(ready) != 3 {
@@ -56,7 +57,7 @@ func TestDelayedQueue_PollOrder(t *testing.T) {
 
 func TestDelayedQueue_PollDoesNotReturnFuture(t *testing.T) {
 	dq := NewDelayedQueue()
-	dq.Add(&Item{JobID: "future", RunAt: time.Now().Add(time.Hour)})
+	dq.Add(&heap.Item{JobID: "future", RunAt: time.Now().Add(time.Hour)})
 
 	ready := dq.Poll(time.Now())
 	if len(ready) != 0 {
@@ -68,12 +69,12 @@ func TestDelayedQueue_Next(t *testing.T) {
 	dq := NewDelayedQueue()
 
 	_, err := dq.Next()
-	if err != ErrEmptyQueue {
+	if err != queue.ErrEmptyQueue {
 		t.Errorf("expected ErrEmptyQueue, got %v", err)
 	}
 
 	runAt := time.Now().Add(time.Minute)
-	dq.Add(&Item{JobID: "job", RunAt: runAt})
+	dq.Add(&heap.Item{JobID: "job", RunAt: runAt})
 
 	next, err := dq.Next()
 	if err != nil {
@@ -88,8 +89,8 @@ func TestDelayedQueue_NextReturnsEarliest(t *testing.T) {
 	dq := NewDelayedQueue()
 	now := time.Now()
 
-	dq.Add(&Item{JobID: "later", RunAt: now.Add(2 * time.Minute)})
-	dq.Add(&Item{JobID: "earlier", RunAt: now.Add(time.Minute)})
+	dq.Add(&heap.Item{JobID: "later", RunAt: now.Add(2 * time.Minute)})
+	dq.Add(&heap.Item{JobID: "earlier", RunAt: now.Add(time.Minute)})
 
 	next, err := dq.Next()
 	if err != nil {
@@ -106,7 +107,7 @@ func TestDelayedQueue_ConcurrentAddPoll(t *testing.T) {
 
 	go func() {
 		for i := 0; i < 100; i++ {
-			dq.Add(&Item{JobID: "job", RunAt: time.Now().Add(-time.Millisecond)})
+			dq.Add(&heap.Item{JobID: "job", RunAt: time.Now().Add(-time.Millisecond)})
 		}
 		close(done)
 	}()

@@ -2,19 +2,21 @@ package scheduler
 
 import (
 	"context"
-	"conduit/config"
+	"conduit/internal/config"
+	"conduit/internal/ds/queue/heap"
+	"conduit/internal/pool"
 )
 
 type schedulerOptions struct {
-	execute func(context.Context, *Item) error
+	execute func(context.Context, *heap.Item) error
 	cfg     config.WorkerPoolConfig
 	onError func(string, error)
-	pool    WorkerPool
+	pool    pool.WorkerPooler
 }
 
 type Option func(*schedulerOptions)
 
-func WithTaskExecutor(fn func(context.Context, *Item) error) Option {
+func WithTaskExecutor(fn func(context.Context, *heap.Item) error) Option {
 	return func(s *schedulerOptions) {
 		s.execute = fn
 	}
@@ -32,7 +34,7 @@ func WithTaskOnError(fn func(string, error)) Option {
 	}
 }
 
-func WithPool(wp WorkerPool) Option {
+func WithPool(wp pool.WorkerPooler) Option {
 	return func(s *schedulerOptions) {
 		s.pool = wp
 	}

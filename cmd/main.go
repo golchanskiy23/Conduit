@@ -1,9 +1,11 @@
 package main
 
 import (
-	"conduit/config"
-	"conduit/handler"
+	"conduit/internal/config"
+	"conduit/internal/ds/queue/heap"
+	"conduit/internal/handler"
 	"conduit/internal/scheduler"
+	"conduit/internal/server"
 	"context"
 	"errors"
 	"log"
@@ -11,10 +13,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
 
-func executeJob(ctx context.Context, item *scheduler.Item) error{
+func executeJob(ctx context.Context, item *heap.Item) error{
 	return nil
 }
 
@@ -43,45 +44,40 @@ func main(){
 	h := handler.NewHTTPHandler(s)
 	mux.HandleFunc("/jobs", h.EnqueueJob)
 
-	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	srv := server.NewServer(mux,
+		cfg,
+		server.WithAddress(cfg.Server.Addr),
+		server.WithReadTimeout(cfg.Server.ReadTimeout),
+		server.WithWriteTimeout(cfg.Server.WriteTimeout),
+		server.WithIdleTimeout(cfg.Server.IdleTimeout),
+		server.WithShutdownTimeout(cfg.Server.ShutdownTimeout),
+	)
 
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
+	srv.Start()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
+
 	case <-quit:
 		log.Println("shutdown signal received")
-	case err := <-errCh:
-		log.Printf("http server error: %v", err)
+
+	case err := <-srv.Errors():
+
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("server error: %v", err)
+		}
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown: %v", err)
-	}
+	signal.Stop(quit)
 
 	cancel()
 
-	/*if err := s.Wait(); err != nil {
-		log.Printf("scheduler shutdown: %v", err)
-	}*/
-	s.Wait()
+	if err := srv.Shutdown(context.Background()); err != nil {
+		log.Fatalf("server shutdown error: %v", err)
+	}
 
-	signal.Stop(quit)
-	close(quit)
+	s.Wait()
+	log.Println("application succesfully stopped")
 }

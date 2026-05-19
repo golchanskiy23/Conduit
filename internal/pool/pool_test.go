@@ -1,4 +1,4 @@
-package scheduler
+package pool
 
 import (
 	"context"
@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"conduit/config"
+	"conduit/internal/config"
+	"conduit/internal/ds/queue/heap"
 )
 
 func testPoolCfg() config.WorkerPoolConfig {
@@ -22,9 +23,9 @@ func TestWorkerPool_ExecutesJob(t *testing.T) {
 	var executed atomic.Int32
 	done := make(chan string, 1)
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			executed.Add(1)
 			return nil
 		}),
@@ -32,7 +33,7 @@ func TestWorkerPool_ExecutesJob(t *testing.T) {
 	)
 	pool.Start(context.Background(), 2)
 
-	job := &Item{JobID: "job1"}
+	job := &heap.Item{JobID: "job1"}
 	if !pool.TryExecute(job) {
 		t.Fatal("TryExecute returned false")
 	}
@@ -55,9 +56,9 @@ func TestWorkerPool_OnErrorCalledOnFailure(t *testing.T) {
 	errCh := make(chan error, 1)
 	doneCh := make(chan string, 1)
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			return errors.New("job failed")
 		}),
 		WithOnDone(func(id string) { doneCh <- id }),
@@ -65,7 +66,7 @@ func TestWorkerPool_OnErrorCalledOnFailure(t *testing.T) {
 	)
 	pool.Start(context.Background(), 1)
 
-	pool.TryExecute(&Item{JobID: "failing"})
+	pool.TryExecute(&heap.Item{JobID: "failing"})
 
 	select {
 	case err := <-errCh:
@@ -89,24 +90,24 @@ func TestWorkerPool_TryExecuteReturnsFalseWhenFull(t *testing.T) {
 		JobTimeout: time.Second,
 	}
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		cfg,
-		WithExecutor(func(ctx context.Context, item *Item) error { return nil }),
+		WithExecutor(func(ctx context.Context, item *heap.Item) error { return nil }),
 		WithOnDone(func(id string) {}),
 	)
 
-	pool.TryExecute(&Item{JobID: "fill"})
+	pool.TryExecute(&heap.Item{JobID: "fill"})
 
-	ok := pool.TryExecute(&Item{JobID: "overflow"})
+	ok := pool.TryExecute(&heap.Item{JobID: "overflow"})
 	if ok {
 		t.Error("expected TryExecute to return false when buffer full")
 	}
 }
 
 func TestWorkerPool_TryExecuteReturnsFalseAfterShutdown(t *testing.T) {
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error { return nil }),
+		WithExecutor(func(ctx context.Context, item *heap.Item) error { return nil }),
 		WithOnDone(func(id string) {}),
 	)
 	pool.Start(context.Background(), 1)
@@ -115,7 +116,7 @@ func TestWorkerPool_TryExecuteReturnsFalseAfterShutdown(t *testing.T) {
 	defer cancel()
 	pool.Shutdown(ctx)
 
-	ok := pool.TryExecute(&Item{JobID: "after-shutdown"})
+	ok := pool.TryExecute(&heap.Item{JobID: "after-shutdown"})
 	if ok {
 		t.Error("expected TryExecute to return false after shutdown")
 	}
@@ -125,9 +126,9 @@ func TestWorkerPool_ShutdownWaitsForWorkers(t *testing.T) {
 	var inProgress atomic.Bool
 	started := make(chan struct{})
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			inProgress.Store(true)
 			close(started)
 			time.Sleep(100 * time.Millisecond)
@@ -137,7 +138,7 @@ func TestWorkerPool_ShutdownWaitsForWorkers(t *testing.T) {
 		WithOnDone(func(id string) {}),
 	)
 	pool.Start(context.Background(), 1)
-	pool.TryExecute(&Item{JobID: "slow"})
+	pool.TryExecute(&heap.Item{JobID: "slow"})
 
 	<-started
 
@@ -151,16 +152,16 @@ func TestWorkerPool_ShutdownWaitsForWorkers(t *testing.T) {
 }
 
 func TestWorkerPool_ShutdownTimeout(t *testing.T) {
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			time.Sleep(time.Second)
 			return nil
 		}),
 		WithOnDone(func(id string) {}),
 	)
 	pool.Start(context.Background(), 1)
-	pool.TryExecute(&Item{JobID: "slow"})
+	pool.TryExecute(&heap.Item{JobID: "slow"})
 	time.Sleep(10 * time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -173,9 +174,9 @@ func TestWorkerPool_ShutdownTimeout(t *testing.T) {
 }
 
 func TestWorkerPool_ShutdownIdempotent(t *testing.T) {
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error { return nil }),
+		WithExecutor(func(ctx context.Context, item *heap.Item) error { return nil }),
 		WithOnDone(func(id string) {}),
 	)
 	pool.Start(context.Background(), 1)
@@ -190,16 +191,16 @@ func TestWorkerPool_ShutdownIdempotent(t *testing.T) {
 func TestWorkerPool_PanicRecovery(t *testing.T) {
 	errCh := make(chan error, 1)
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			panic("unexpected panic")
 		}),
 		WithOnDone(func(id string) {}),
 		WithOnError(func(id string, err error) { errCh <- err }),
 	)
 	pool.Start(context.Background(), 1)
-	pool.TryExecute(&Item{JobID: "panicking"})
+	pool.TryExecute(&heap.Item{JobID: "panicking"})
 
 	select {
 	case err := <-errCh:
@@ -211,13 +212,13 @@ func TestWorkerPool_PanicRecovery(t *testing.T) {
 	}
 
 	doneCh := make(chan string, 1)
-	pool2 := newWorkerPool(
+	pool2 := NewWorkerPool(
 		testPoolCfg(),
-		WithExecutor(func(ctx context.Context, item *Item) error { return nil }),
+		WithExecutor(func(ctx context.Context, item *heap.Item) error { return nil }),
 		WithOnDone(func(id string) { doneCh <- id }),
 	)
 	pool2.Start(context.Background(), 1)
-	pool2.TryExecute(&Item{JobID: "after-panic"})
+	pool2.TryExecute(&heap.Item{JobID: "after-panic"})
 
 	select {
 	case <-doneCh:
@@ -230,9 +231,9 @@ func TestWorkerPool_ConcurrentTryExecute(t *testing.T) {
 	var count atomic.Int32
 	var wg sync.WaitGroup
 
-	pool := newWorkerPool(
+	pool := NewWorkerPool(
 		config.WorkerPoolConfig{BufferSize: 200, JobTimeout: time.Second},
-		WithExecutor(func(ctx context.Context, item *Item) error {
+		WithExecutor(func(ctx context.Context, item *heap.Item) error {
 			count.Add(1)
 			return nil
 		}),
@@ -244,7 +245,7 @@ func TestWorkerPool_ConcurrentTryExecute(t *testing.T) {
 	wg.Add(n)
 	for i := 0; i < n; i++ {
 		go func(n int) {
-			pool.TryExecute(&Item{JobID: string(rune('a' + n%26))})
+			pool.TryExecute(&heap.Item{JobID: string(rune('a' + n%26))})
 		}(i)
 	}
 
