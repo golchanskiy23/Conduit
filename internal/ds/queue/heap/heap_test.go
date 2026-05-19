@@ -1,6 +1,7 @@
-package scheduler
+package heap
 
 import (
+	"conduit/internal/ds/queue"
 	"testing"
 	"time"
 )
@@ -42,7 +43,7 @@ func TestPriorityQueue_PopEmpty(t *testing.T) {
 	pq := NewPriorityQueue()
 
 	_, err := pq.Pop()
-	if err != ErrEmptyQueue {
+	if err != queue.ErrEmptyQueue {
 		t.Errorf("expected ErrEmptyQueue, got %v", err)
 	}
 }

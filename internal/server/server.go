@@ -1,7 +1,7 @@
-package scheduler
+package server
 
 import (
-	"conduit/config"
+	"conduit/internal/config"
 	"errors"
 	"net/http"
 	"sync"
@@ -9,38 +9,6 @@ import (
 	"context"
 	"fmt"
 )
-
-type ServerOption func(srv *Server)
-
-func WithAddress(addr string) ServerOption{
-	return func(srv *Server){
-		srv.internalServer.Addr = addr
-	}
-}
-
-func WithReadTimeout(readTimeout time.Duration) ServerOption{
-	return func(srv *Server){
-		srv.internalServer.ReadTimeout = readTimeout
-	}
-}
-
-func WithWriteTimeout(writeTimeout time.Duration) ServerOption{
-	return func(srv *Server){
-		srv.internalServer.WriteTimeout = writeTimeout
-	}
-}
-
-func WithIdleTimeout(idleTimeout time.Duration) ServerOption{
-	return func(srv *Server){
-		srv.internalServer.IdleTimeout = idleTimeout
-	}
-}
-
-func WithShutdownTimeout(shutdownTimeout time.Duration) ServerOption{
-	return func(srv *Server){
-		srv.shutdownTimeout = shutdownTimeout
-	}
-}
 
 type Server struct{
 	internalServer *http.Server

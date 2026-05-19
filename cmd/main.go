@@ -1,9 +1,11 @@
 package main
 
 import (
-	"conduit/config"
-	"conduit/handler"
+	"conduit/internal/config"
+	"conduit/internal/ds/queue/heap"
+	"conduit/internal/handler"
 	"conduit/internal/scheduler"
+	"conduit/internal/server"
 	"context"
 	"errors"
 	"log"
@@ -13,7 +15,7 @@ import (
 	"syscall"
 )
 
-func executeJob(ctx context.Context, item *scheduler.Item) error{
+func executeJob(ctx context.Context, item *heap.Item) error{
 	return nil
 }
 
@@ -42,13 +44,13 @@ func main(){
 	h := handler.NewHTTPHandler(s)
 	mux.HandleFunc("/jobs", h.EnqueueJob)
 
-	srv := scheduler.NewServer(mux,
+	srv := server.NewServer(mux,
 		cfg,
-		scheduler.WithAddress(cfg.Server.Addr),
-		scheduler.WithReadTimeout(cfg.Server.ReadTimeout),
-		scheduler.WithWriteTimeout(cfg.Server.WriteTimeout),
-		scheduler.WithIdleTimeout(cfg.Server.IdleTimeout),
-		scheduler.WithShutdownTimeout(cfg.Server.ShutdownTimeout),
+		server.WithAddress(cfg.Server.Addr),
+		server.WithReadTimeout(cfg.Server.ReadTimeout),
+		server.WithWriteTimeout(cfg.Server.WriteTimeout),
+		server.WithIdleTimeout(cfg.Server.IdleTimeout),
+		server.WithShutdownTimeout(cfg.Server.ShutdownTimeout),
 	)
 
 	srv.Start()

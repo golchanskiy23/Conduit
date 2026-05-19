@@ -1,6 +1,7 @@
-package scheduler
+package heap
 
 import (
+	"conduit/internal/ds/queue"
 	"container/heap"
 	"sync"
 	"time"
@@ -84,12 +85,12 @@ func (h *PriorityQueue) Pop() (*Item, error) {
 	defer h.mu.Unlock()
 
 	if len(h.heap) == 0 {
-		return nil, ErrEmptyQueue
+		return nil, queue.ErrEmptyQueue
 	}
 
 	val, ok := heap.Pop(&h.heap).(*Item)
 	if !ok {
-		return nil, ErrConversion
+		return nil, queue.ErrConversion
 	}
 
 	return val, nil

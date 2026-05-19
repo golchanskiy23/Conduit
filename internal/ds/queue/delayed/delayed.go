@@ -1,19 +1,21 @@
-package scheduler
+package delayed
 
 import (
+	"conduit/internal/ds/queue"
+	minHeap "conduit/internal/ds/queue/heap"
 	"container/heap"
 	"sync"
 	"time"
 )
 
-type delayedMinHeap []*Item
+type delayedMinHeap []*minHeap.Item
 
 func (h delayedMinHeap) Less(i, j int) bool { return h[i].RunAt.Before(h[j].RunAt) }
 func (h delayedMinHeap) Len() int           { return len(h) }
 func (h delayedMinHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *delayedMinHeap) Push(x any) {
-	val, ok := x.(*Item)
+	val, ok := x.(*minHeap.Item)
 	if !ok {
 		return
 	}
@@ -40,19 +42,19 @@ func NewDelayedQueue() *DelayedQueue {
 	return dq
 }
 
-func (dq *DelayedQueue) Add(item *Item) {
+func (dq *DelayedQueue) Add(item *minHeap.Item) {
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
 	heap.Push(&dq.heap, item)
 }
 
-func (dq *DelayedQueue) Poll(now time.Time) []*Item {
+func (dq *DelayedQueue) Poll(now time.Time) []*minHeap.Item {
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
 
-	var ready []*Item
+	var ready []*minHeap.Item
 	for len(dq.heap) > 0 && !dq.heap[0].RunAt.After(now) {
-		top, ok := heap.Pop(&dq.heap).(*Item)
+		top, ok := heap.Pop(&dq.heap).(*minHeap.Item)
 		if !ok {
 			continue
 		}
@@ -66,7 +68,7 @@ func (dq *DelayedQueue) Next() (time.Time, error) {
     defer dq.mu.Unlock()
 
     if len(dq.heap) == 0 {
-        return time.Time{}, ErrEmptyQueue
+        return time.Time{}, queue.ErrEmptyQueue
     }
     return dq.heap[0].RunAt, nil
 }
