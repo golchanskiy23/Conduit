@@ -12,7 +12,7 @@ type ExpiryItem struct{
 
 type ExpiryHeap []*ExpiryItem
 
-func (h ExpiryHeap) Len() int{return 0}
+func (h ExpiryHeap) Len() int{return len(h)}
 
 func (h ExpiryHeap) Less(i,j int) bool{return h[i].ExpiredAt.Before(h[j].ExpiredAt)}
 

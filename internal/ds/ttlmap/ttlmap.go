@@ -82,7 +82,7 @@ func (m *TTLMap) Delete(key string){
 }
 
 func (m *TTLMap) Close(){
-	m.once.Do(func(){close(m.wake)})
+	m.once.Do(func(){close(m.errCh)})
 }
 
 func (m *TTLMap) cleanup(){
@@ -99,7 +99,10 @@ func (m *TTLMap) cleanup(){
 				return
 			}
 		} else{
+			m.mu.Lock()
 			nextExpired := m.expiryHeap[0].ExpiredAt
+			m.mu.Unlock()
+			
 			timer := time.NewTimer(time.Until(nextExpired))
 			select{
 			case <-timer.C:
@@ -119,5 +122,4 @@ func (m *TTLMap) cleanup(){
 			}
 		}
 	}
-
 }

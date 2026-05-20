@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"conduit/internal/ds/graph"
 	"conduit/internal/ds/queue/heap"
+	"conduit/internal/ds/ttlmap"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,16 @@ func (m *mockSubmitter) Submit(job *heap.Item, deps []string) error {
 	return m.err
 }
 
+type countingSubmitter struct {
+	inner *mockSubmitter
+	calls int
+}
+
+func (c *countingSubmitter) Submit(job *heap.Item, deps []string) error {
+	c.calls++
+	return c.inner.Submit(job, deps)
+}
+
 func makeRequest(t *testing.T, body any) *http.Request {
 	t.Helper()
 	b, err := json.Marshal(body)
@@ -47,6 +58,7 @@ func newTestHandler(sub Submitter) *JobHandler {
             counter++
             return fmt.Sprintf("%064x", counter), nil
         },
+		ttlMap: ttlmap.New(10*time.Minute),
     }
 }
 
@@ -106,13 +118,15 @@ func TestEnqueueJob_JobIDIsSHA256Hex(t *testing.T) {
 }
 
 func TestEnqueueJob_UniqueJobIDs(t *testing.T) {
-	ids := map[string]bool{}
 	sub := &mockSubmitter{}
 	h := newTestHandler(sub)
+	ids := map[string]bool{}
 
 	for i := 0; i < 100; i++ {
 		rr := httptest.NewRecorder()
-		h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+		h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{
+			Description: fmt.Sprintf("unique-job-%d", i),
+		}))
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("request %d: expected 202, got %d", i, rr.Code)
 		}
@@ -231,5 +245,123 @@ func TestEnqueueJob_ContentTypeJSON(t *testing.T) {
 	ct := rr.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %s", ct)
+	}
+}
+
+func TestEnqueueJob_IdempotentRequest(t *testing.T) {
+	sub := &mockSubmitter{}
+	h := newTestHandler(sub)
+
+	body := EnqueueRequest{
+		Description: "send-email",
+		Priority:    heap.PriorityNormal,
+		RunAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	rr1 := httptest.NewRecorder()
+	h.EnqueueJob(rr1, makeRequest(t, body))
+
+	var resp1 map[string]string
+	json.NewDecoder(rr1.Body).Decode(&resp1)
+	firstID := resp1["job_id"]
+
+	rr2 := httptest.NewRecorder()
+	h.EnqueueJob(rr2, makeRequest(t, body))
+
+	var resp2 map[string]string
+	json.NewDecoder(rr2.Body).Decode(&resp2)
+
+	if rr2.Code != http.StatusAccepted {
+		t.Errorf("expected 202 on duplicate, got %d", rr2.Code)
+	}
+	if resp2["job_id"] != firstID {
+		t.Errorf("expected same job_id %s, got %s", firstID, resp2["job_id"])
+	}
+}
+
+func TestEnqueueJob_DifferentDescriptionDifferentJob(t *testing.T) {
+	sub := &mockSubmitter{}
+	h := newTestHandler(sub)
+
+	rr1 := httptest.NewRecorder()
+	h.EnqueueJob(rr1, makeRequest(t, EnqueueRequest{Description: "job-a"}))
+	var resp1 map[string]string
+	json.NewDecoder(rr1.Body).Decode(&resp1)
+
+	rr2 := httptest.NewRecorder()
+	h.EnqueueJob(rr2, makeRequest(t, EnqueueRequest{Description: "job-b"}))
+	var resp2 map[string]string
+	json.NewDecoder(rr2.Body).Decode(&resp2)
+
+	if resp1["job_id"] == resp2["job_id"] {
+		t.Error("expected different job_ids for different descriptions")
+	}
+}
+
+func TestEnqueueJob_TTLMapClearedOnSubmitError(t *testing.T) {
+	sub := &mockSubmitter{err: errors.New("fail")}
+	h := newTestHandler(sub)
+
+	body := EnqueueRequest{Description: "rollback-test"}
+
+	rr1 := httptest.NewRecorder()
+	h.EnqueueJob(rr1, makeRequest(t, body))
+	if rr1.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr1.Code)
+	}
+
+	sub.err = nil
+	rr2 := httptest.NewRecorder()
+	h.EnqueueJob(rr2, makeRequest(t, body))
+	if rr2.Code != http.StatusAccepted {
+		t.Errorf("expected 202 after error cleared, got %d", rr2.Code)
+	}
+}
+
+func TestEnqueueJob_IdempotentDoesNotCallSubmitTwice(t *testing.T) {
+	calls := 0
+	sub := &mockSubmitter{}
+	h := newTestHandler(sub)
+
+	origSubmit := sub
+	_ = origSubmit
+
+	counting := &countingSubmitter{inner: sub}
+	h.scheduler = counting
+
+	body := EnqueueRequest{Description: "count-test"}
+	h.EnqueueJob(httptest.NewRecorder(), makeRequest(t, body))
+	h.EnqueueJob(httptest.NewRecorder(), makeRequest(t, body))
+	_ = calls
+
+	if counting.calls != 1 {
+		t.Errorf("expected Submit called once, got %d", counting.calls)
+	}
+}
+
+func TestEnqueueJob_TTLExpiredAllowsNewJob(t *testing.T) {
+	sub := &mockSubmitter{}
+	h := &JobHandler{
+		scheduler:  sub,
+		generateID: generateJobID,
+		ttlMap:     ttlmap.New(50 * time.Millisecond),
+	}
+
+	body := EnqueueRequest{Description: "ttl-expiry"}
+
+	rr1 := httptest.NewRecorder()
+	h.EnqueueJob(rr1, makeRequest(t, body))
+	var resp1 map[string]string
+	json.NewDecoder(rr1.Body).Decode(&resp1)
+
+	time.Sleep(100 * time.Millisecond)
+
+	rr2 := httptest.NewRecorder()
+	h.EnqueueJob(rr2, makeRequest(t, body))
+	var resp2 map[string]string
+	json.NewDecoder(rr2.Body).Decode(&resp2)
+
+	if resp1["job_id"] == resp2["job_id"] {
+		t.Error("expected new job_id after TTL expiry")
 	}
 }
