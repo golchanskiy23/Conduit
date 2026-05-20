@@ -41,7 +41,7 @@ func main(){
 	go s.Run(ctx)
 
 	mux := http.NewServeMux()
-	h := handler.NewHTTPHandler(s)
+	h := handler.NewHTTPHandler(s, cfg.TTLMap.ExpiredTimeShutdown)
 	mux.HandleFunc("/jobs", h.EnqueueJob)
 
 	srv := server.NewServer(mux,

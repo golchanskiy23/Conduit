@@ -19,6 +19,8 @@ const(
 	defaultJobTimeout = 30
 
 	defaultWorkersNum = 4
+
+	defaultExpiredTimeShutdown = 5
 )
 
 type Config struct{
@@ -26,6 +28,7 @@ type Config struct{
 	PoolCfg WorkerPoolConfig `mapstructure:"poolcfg"`
 	// засунуть позже в app или poolcfg
 	WorkersNum int `mapstructure:"workers_num"`
+	TTLMap TTLMapConfig
 }
 
 type HTTPServer struct{
@@ -39,6 +42,10 @@ type HTTPServer struct{
 type WorkerPoolConfig struct {
 	BufferSize int `mapstructure:"buffer_size"`
 	JobTimeout time.Duration `mapstructure:"job_timeout"`
+}
+
+type TTLMapConfig struct{
+	ExpiredTimeShutdown time.Duration `mapstructure:"expired_time"`
 }
 
 func DefaultConfig() *Config {
@@ -55,6 +62,9 @@ func DefaultConfig() *Config {
 			JobTimeout: defaultJobTimeout * time.Second,
 		},
 		WorkersNum: defaultWorkersNum,
+		TTLMap: TTLMapConfig{
+			ExpiredTimeShutdown: defaultExpiredTimeShutdown*time.Minute,
+		},
 	}
 }
 

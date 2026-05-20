@@ -160,7 +160,7 @@ func TestEnqueueJob_ResponseJobIDIsSHA256Hex(t *testing.T) {
 
 func TestEnqueueJob_CollisionReturns409(t *testing.T) {
 	sub := &mockSubmitter{err: graph.ErrAlreadyExists}
-	h := NewHTTPHandler(sub)
+	h := NewHTTPHandler(sub, 10*time.Minute)
 
 	rr := httptest.NewRecorder()
 	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))

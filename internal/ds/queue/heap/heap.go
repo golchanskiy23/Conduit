@@ -18,6 +18,7 @@ type Priority int
 
 type Item struct {
 	JobID      string
+	Description string
 	Priority   Priority
 	RunAt time.Time
 	EnqueuedAt time.Time

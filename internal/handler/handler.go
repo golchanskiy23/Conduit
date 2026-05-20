@@ -3,6 +3,7 @@ package handler
 import (
 	"conduit/internal/ds/graph"
 	"conduit/internal/ds/queue/heap"
+	ttl "conduit/internal/ds/ttlmap"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -22,12 +23,14 @@ type IDGenerator func() (string, error)
 type JobHandler struct {
 	scheduler Submitter
 	generateID  IDGenerator
+	ttlMap *ttl.TTLMap
 }
 
-func NewHTTPHandler(s Submitter) *JobHandler {
+func NewHTTPHandler(s Submitter, t time.Duration) *JobHandler {
 	return &JobHandler{
 		scheduler: s,
 		generateID: generateJobID,
+		ttlMap: ttl.New(t),
 	}
 }
 
