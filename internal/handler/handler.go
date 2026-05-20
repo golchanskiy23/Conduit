@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -36,6 +37,7 @@ func NewHTTPHandler(s Submitter, t time.Duration) *JobHandler {
 
 type EnqueueRequest struct {
 	Priority heap.Priority `json:"priority"`
+	Description string `json:"description"`
 	RunAt    time.Time         `json:"run_at"`
 	Deps     []string          `json:"deps"`
 }
@@ -47,6 +49,17 @@ func generateJobID() (string, error) {
     }
     hash := sha256.Sum256([]byte(id.String()))
     return fmt.Sprintf("%x", hash), nil
+}
+
+func makeTTLKey(req *EnqueueRequest) string{
+	key := fmt.Sprintf("%d|%s|%v|%v|",
+		req.Priority, 
+		req.Description, 
+		req.RunAt.UTC().Format(time.RFC3339Nano),
+		strings.Join(req.Deps, ","),
+	)
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum)
 }
 
 func (h *JobHandler) EnqueueJob(w http.ResponseWriter, r *http.Request) {
@@ -64,10 +77,19 @@ func (h *JobHandler) EnqueueJob(w http.ResponseWriter, r *http.Request) {
 
 	job := &heap.Item{
 		JobID:    jobID,
+		Description: req.Description,
 		Priority: req.Priority,
 		RunAt: req.RunAt,
 		EnqueuedAt: time.Now(),
 	}
+
+	key := makeTTLKey(&req)
+    if existing, created := h.ttlMap.SetIfAbsent(key, job); !created {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusAccepted)
+        json.NewEncoder(w).Encode(map[string]string{"job_id": existing.JobID})
+        return
+    }
 
 	if err := h.scheduler.Submit(job, req.Deps); err != nil {
 		if errors.Is(err, graph.ErrAlreadyExists) {

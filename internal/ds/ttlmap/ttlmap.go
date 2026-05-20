@@ -3,28 +3,10 @@ package ttlmap
 import (
 	priorityqueue "conduit/internal/ds/queue/heap"
 	"container/heap"
+	"conduit/internal/ds/queue/expiring"
 	"sync"
 	"time"
 )
-
-type expiryItem struct{
-	expiredAt time.Time
-	key string
-	index int
-}
-
-type ExpiryHeap []*expiryItem
-
-func (h ExpiryHeap) Len() int{return 0}
-
-func (h ExpiryHeap) Less(i,j int) bool{return false}
-
-func (h ExpiryHeap) Swap(i,j int) {}
-
-func (h *ExpiryHeap) Push(val any){}
-
-func (h *ExpiryHeap) Pop() any{return nil}
-
 
 type jobEntry struct{
 	item *priorityqueue.Item
@@ -35,8 +17,8 @@ type TTLMap struct{
 	TTLShutdown time.Duration
 	mu sync.Mutex
 	entryMap map[string]*jobEntry
-	indexMap map[string]*expiryItem
-	expiryHeap ExpiryHeap
+	indexMap map[string]*expiring.ExpiryItem
+	expiryHeap expiring.ExpiryHeap
 	wake chan struct{}
 	errCh chan struct{}
 	once sync.Once
@@ -47,8 +29,8 @@ func New(t time.Duration) *TTLMap{
 		TTLShutdown: t,
 		mu: sync.Mutex{},
 		entryMap: make(map[string]*jobEntry),
-		indexMap: make(map[string]*expiryItem),
-		expiryHeap: ExpiryHeap{},
+		indexMap: make(map[string]*expiring.ExpiryItem),
+		expiryHeap: expiring.ExpiryHeap{},
 		wake: make(chan struct{}, 1),
 		once: sync.Once{},
 	}
@@ -58,26 +40,32 @@ func New(t time.Duration) *TTLMap{
 	return m
 }
 
-func (m *TTLMap) Set(key string, item *priorityqueue.Item){
-	expiredAt := time.Now().Add(m.TTLShutdown)
-
+func (m *TTLMap) SetIfAbsent(key string, job *priorityqueue.Item) (*priorityqueue.Item, bool){
 	m.mu.Lock()
-	m.entryMap[key] = &jobEntry{item: item, expiredAt: expiredAt}
-	
-	if existingItem, existing := m.indexMap[key]; existing{
-		existingItem.expiredAt = expiredAt
-		heap.Fix(&m.expiryHeap, existingItem.index)
-	} else{
-		expItem := &expiryItem{expiredAt: expiredAt, key: key}
-		m.expiryHeap.Push(expItem)
-		m.indexMap[key] = expItem
-	}
-	m.mu.Unlock()
+	defer m.mu.Unlock()
 
-	select{
-	case m.wake <- struct{}{}:
-	default:
+	if item, ok := m.entryMap[key]; ok{
+		if !time.Now().After(item.expiredAt){
+			return item.item, false
+		}
+
+		idx := m.indexMap[key]
+		heap.Remove(&m.expiryHeap, idx.Index)
+		delete(m.indexMap, key)
 	}
+
+	expiresAt := time.Now().Add(m.TTLShutdown)
+    m.entryMap[key] = &jobEntry{item: job, expiredAt: expiresAt}
+    item := &expiring.ExpiryItem{Key: key, ExpiredAt: expiresAt}
+    heap.Push(&m.expiryHeap, item)
+    m.indexMap[key] = item
+
+    select {
+    case m.wake <- struct{}{}:
+    default:
+    }
+
+    return job, true
 }
 
 func (m *TTLMap) Delete(key string){
@@ -89,25 +77,8 @@ func (m *TTLMap) Delete(key string){
 	}
 	delete(m.entryMap, key)
 	idx := m.indexMap[key]
-	heap.Remove(&m.expiryHeap, idx.index)
+	heap.Remove(&m.expiryHeap, idx.Index)
 	delete(m.indexMap, key)
-}
-
-func (m *TTLMap) Get(key string)(*priorityqueue.Item, bool){
-	m.mu.Lock()
-	el, ok := m.entryMap[key] 
-	m.mu.Unlock()
-
-	if !ok{
-		return nil, false
-	}
-
-	if time.Now().After(el.expiredAt){
-		m.Delete(key)
-		return nil, false
-	}
-
-	return el.item, true
 }
 
 func (m *TTLMap) Close(){
@@ -128,16 +99,16 @@ func (m *TTLMap) cleanup(){
 				return
 			}
 		} else{
-			nextExpired := m.expiryHeap[0].expiredAt
+			nextExpired := m.expiryHeap[0].ExpiredAt
 			timer := time.NewTimer(time.Until(nextExpired))
 			select{
 			case <-timer.C:
 				m.mu.Lock()
 				curr := time.Now()
-				for len(m.expiryHeap) > 0 && curr.After(m.expiryHeap[0].expiredAt){
-					item := heap.Pop(&m.expiryHeap).(*expiryItem)
-					delete(m.indexMap, item.key)
-					delete(m.entryMap, item.key)
+				for len(m.expiryHeap) > 0 && curr.After(m.expiryHeap[0].ExpiredAt){
+					item := heap.Pop(&m.expiryHeap).(*expiring.ExpiryItem)
+					delete(m.indexMap, item.Key)
+					delete(m.entryMap, item.Key)
 				}
 				m.mu.Unlock()
 			case <-m.errCh:
