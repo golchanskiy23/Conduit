@@ -19,7 +19,7 @@ const(
 
 type Config struct{
 	Server HTTPServer `mapstructure:"server"`
-	PoolCfg WorkerPoolConfig `mapstructure:"poolcfg"`
+	PoolCfg []WorkerPoolConfig `mapstructure:"poolcfg"`
 	TTLMap TTLMapConfig `mapstructure:"ttlmap"`
 }
 

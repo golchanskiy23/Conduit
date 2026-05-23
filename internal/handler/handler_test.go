@@ -51,15 +51,15 @@ func makeRequest(t *testing.T, body any) *http.Request {
 }
 
 func newTestHandler(sub Submitter) *JobHandler {
-    counter := 0
-    return &JobHandler{
-        scheduler: sub,
-        generateID: func() (string, error) {
-            counter++
-            return fmt.Sprintf("%064x", counter), nil
-        },
-		ttlMap: ttlmap.New(10*time.Minute),
-    }
+	counter := 0
+	return &JobHandler{
+		scheduler: sub,
+		generateID: func() (string, error) {
+			counter++
+			return fmt.Sprintf("%064x", counter), nil
+		},
+		ttlMap: ttlmap.New(10 * time.Minute),
+	}
 }
 
 func TestEnqueueJob_Success(t *testing.T) {
@@ -68,6 +68,7 @@ func TestEnqueueJob_Success(t *testing.T) {
 
 	runAt := time.Now().Add(time.Minute)
 	body := EnqueueRequest{
+		JobType:  "payment.charge",
 		Priority: heap.PriorityHigh,
 		RunAt:    runAt,
 		Deps:     []string{"dep1"},
@@ -90,12 +91,24 @@ func TestEnqueueJob_Success(t *testing.T) {
 	}
 }
 
+func TestEnqueueJob_JobTypePropagated(t *testing.T) {
+	sub := &mockSubmitter{}
+	h := newTestHandler(sub)
+
+	rr := httptest.NewRecorder()
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "email.send"}))
+
+	if sub.lastJob.JobType != "email.send" {
+		t.Errorf("expected email.send, got %s", sub.lastJob.JobType)
+	}
+}
+
 func TestEnqueueJob_GeneratesJobID(t *testing.T) {
 	sub := &mockSubmitter{}
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{Priority: heap.PriorityNormal}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "email.send"}))
 
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rr.Code)
@@ -110,7 +123,7 @@ func TestEnqueueJob_JobIDIsSHA256Hex(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "report.generate"}))
 
 	if !sha256Regex.MatchString(sub.lastJob.JobID) {
 		t.Errorf("JobID is not valid sha256 hex: %q", sub.lastJob.JobID)
@@ -125,7 +138,7 @@ func TestEnqueueJob_UniqueJobIDs(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		rr := httptest.NewRecorder()
 		h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{
-			Description: fmt.Sprintf("unique-job-%d", i),
+			JobType: fmt.Sprintf("job.type.%d", i),
 		}))
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("request %d: expected 202, got %d", i, rr.Code)
@@ -143,7 +156,7 @@ func TestEnqueueJob_ResponseContainsJobID(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "payment.charge"}))
 
 	var resp map[string]string
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
@@ -162,7 +175,7 @@ func TestEnqueueJob_ResponseJobIDIsSHA256Hex(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "payment.charge"}))
 
 	var resp map[string]string
 	json.NewDecoder(rr.Body).Decode(&resp)
@@ -177,7 +190,7 @@ func TestEnqueueJob_CollisionReturns409(t *testing.T) {
 	h := NewHTTPHandler(sub, 10*time.Minute)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "payment.unique"}))
 
 	if rr.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", rr.Code)
@@ -201,7 +214,7 @@ func TestEnqueueJob_SubmitErrorReturns500(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "payment.error"}))
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", rr.Code)
@@ -213,7 +226,7 @@ func TestEnqueueJob_NoWriteAfterError(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "payment.fail"}))
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("expected only 500, got %d", rr.Code)
@@ -225,7 +238,10 @@ func TestEnqueueJob_NoDeps(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{Priority: heap.PriorityLow}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{
+		JobType:  "email.send",
+		Priority: heap.PriorityLow,
+	}))
 
 	if rr.Code != http.StatusAccepted {
 		t.Errorf("expected 202, got %d", rr.Code)
@@ -240,7 +256,7 @@ func TestEnqueueJob_ContentTypeJSON(t *testing.T) {
 	h := newTestHandler(sub)
 
 	rr := httptest.NewRecorder()
-	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{}))
+	h.EnqueueJob(rr, makeRequest(t, EnqueueRequest{JobType: "email.send"}))
 
 	ct := rr.Header().Get("Content-Type")
 	if ct != "application/json" {
@@ -253,21 +269,19 @@ func TestEnqueueJob_IdempotentRequest(t *testing.T) {
 	h := newTestHandler(sub)
 
 	body := EnqueueRequest{
-		Description: "send-email",
-		Priority:    heap.PriorityNormal,
-		RunAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		JobType:  "payment.charge",
+		Priority: heap.PriorityNormal,
+		RunAt:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 
 	rr1 := httptest.NewRecorder()
 	h.EnqueueJob(rr1, makeRequest(t, body))
-
 	var resp1 map[string]string
 	json.NewDecoder(rr1.Body).Decode(&resp1)
 	firstID := resp1["job_id"]
 
 	rr2 := httptest.NewRecorder()
 	h.EnqueueJob(rr2, makeRequest(t, body))
-
 	var resp2 map[string]string
 	json.NewDecoder(rr2.Body).Decode(&resp2)
 
@@ -279,22 +293,22 @@ func TestEnqueueJob_IdempotentRequest(t *testing.T) {
 	}
 }
 
-func TestEnqueueJob_DifferentDescriptionDifferentJob(t *testing.T) {
+func TestEnqueueJob_DifferentJobTypeDifferentJob(t *testing.T) {
 	sub := &mockSubmitter{}
 	h := newTestHandler(sub)
 
 	rr1 := httptest.NewRecorder()
-	h.EnqueueJob(rr1, makeRequest(t, EnqueueRequest{Description: "job-a"}))
+	h.EnqueueJob(rr1, makeRequest(t, EnqueueRequest{JobType: "payment.charge"}))
 	var resp1 map[string]string
 	json.NewDecoder(rr1.Body).Decode(&resp1)
 
 	rr2 := httptest.NewRecorder()
-	h.EnqueueJob(rr2, makeRequest(t, EnqueueRequest{Description: "job-b"}))
+	h.EnqueueJob(rr2, makeRequest(t, EnqueueRequest{JobType: "email.send"}))
 	var resp2 map[string]string
 	json.NewDecoder(rr2.Body).Decode(&resp2)
 
 	if resp1["job_id"] == resp2["job_id"] {
-		t.Error("expected different job_ids for different descriptions")
+		t.Error("expected different job_ids for different job types")
 	}
 }
 
@@ -302,7 +316,7 @@ func TestEnqueueJob_TTLMapClearedOnSubmitError(t *testing.T) {
 	sub := &mockSubmitter{err: errors.New("fail")}
 	h := newTestHandler(sub)
 
-	body := EnqueueRequest{Description: "rollback-test"}
+	body := EnqueueRequest{JobType: "payment.rollback"}
 
 	rr1 := httptest.NewRecorder()
 	h.EnqueueJob(rr1, makeRequest(t, body))
@@ -319,20 +333,21 @@ func TestEnqueueJob_TTLMapClearedOnSubmitError(t *testing.T) {
 }
 
 func TestEnqueueJob_IdempotentDoesNotCallSubmitTwice(t *testing.T) {
-	calls := 0
 	sub := &mockSubmitter{}
-	h := newTestHandler(sub)
-
-	origSubmit := sub
-	_ = origSubmit
-
 	counting := &countingSubmitter{inner: sub}
-	h.scheduler = counting
+	counter := 0
+	h := &JobHandler{
+		scheduler: counting,
+		generateID: func() (string, error) {
+			counter++
+			return fmt.Sprintf("%064x", counter), nil
+		},
+		ttlMap: ttlmap.New(10 * time.Minute),
+	}
 
-	body := EnqueueRequest{Description: "count-test"}
+	body := EnqueueRequest{JobType: "payment.count"}
 	h.EnqueueJob(httptest.NewRecorder(), makeRequest(t, body))
 	h.EnqueueJob(httptest.NewRecorder(), makeRequest(t, body))
-	_ = calls
 
 	if counting.calls != 1 {
 		t.Errorf("expected Submit called once, got %d", counting.calls)
@@ -347,7 +362,7 @@ func TestEnqueueJob_TTLExpiredAllowsNewJob(t *testing.T) {
 		ttlMap:     ttlmap.New(50 * time.Millisecond),
 	}
 
-	body := EnqueueRequest{Description: "ttl-expiry"}
+	body := EnqueueRequest{JobType: "payment.ttl"}
 
 	rr1 := httptest.NewRecorder()
 	h.EnqueueJob(rr1, makeRequest(t, body))

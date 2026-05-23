@@ -17,7 +17,8 @@ type Scheduler struct {
 	pq      *heap.PriorityQueue
 	delayed *delayed.DelayedQueue
 	dag     *graph.DAG
-	pool    pool.WorkerPooler
+	pools    []pool.WorkerPooler
+	onError func(string, error)
 
 	registry    map[string]*heap.Item
 	mu          sync.Mutex
@@ -26,15 +27,6 @@ type Scheduler struct {
 }
 
 func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
-	so := &schedulerOptions{
-		onError: func(id string, err error) {
-			log.Printf("job %s error: %v", id, err)
-		},
-	}
-	for _, opt := range options {
-		opt(so)
-	}
-
 	s := &Scheduler{
 		pq:          heap.NewPriorityQueue(),
 		delayed:     delayed.NewDelayedQueue(),
@@ -44,27 +36,31 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 		done:        make(chan struct{}),
 	}
 
-	if so.pool != nil {
-        s.pool = so.pool
-    } else {
-		// откуда взять jobtype?
-        s.pool = pool.NewWorkerPool(cfg.PoolCfg,
-			jobtype,
-            pool.WithExecutor(so.execute),
-            pool.WithOnDone(s.OnDone),
-            pool.WithOnError(so.onError),
-        )
-    }
+	for _, opt := range options {
+		opt(s)
+	}
 
 	return  s
 }
 
-func (s *Scheduler) Start(ctx context.Context, n int) {
-	s.pool.Start(ctx, n)
+func (s *Scheduler) Start(ctx context.Context) {
+	for _, p := range s.pools{
+		p.Start(ctx)
+	}
 }
 
 func (s *Scheduler) Wait() {
 	<-s.done
+}
+
+func (s *Scheduler) dispatch(job *heap.Item) bool {
+	for _, p := range s.pools {
+		if p.Worker().Handles(job.JobType) {
+			return p.TryExecute(job)
+		}
+	}
+	s.onError(job.JobID, fmt.Errorf("%w: %s", ErrNoSuchWorker, job.JobType))
+	return false
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
@@ -88,7 +84,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 		var overflow []*heap.Item
 		for _, item := range batch {
-			if !s.pool.TryExecute(item) {
+			if !s.dispatch(item) {
 				overflow = append(overflow, item)
 			}
 		}
@@ -110,8 +106,10 @@ func (s *Scheduler) Run(ctx context.Context) {
         select {
 		case <-ctx.Done():
 			timer.Stop()
-			if err := s.pool.Shutdown(ctx); err != nil {
-				log.Printf("pool shutdown: %v", err)
+			for _, p := range s.pools{
+				if err := p.Shutdown(ctx); err != nil {
+					log.Printf("pool shutdown: %v", err)
+				}
 			}
 			return
 		case <-timer.C:
@@ -140,6 +138,19 @@ func (s *Scheduler) Submit(job *heap.Item, deps []string) error {
         s.mu.Unlock()
         return fmt.Errorf("%w: %s", graph.ErrAlreadyExists, job.JobID)
     }
+
+	hasWorker := false
+	for _, p := range s.pools {
+    	if p.Worker().Handles(job.JobType) {
+        	hasWorker = true
+        	break
+    	}
+	}
+
+	if !hasWorker {
+    	s.mu.Unlock()
+    	return fmt.Errorf("%w: %s", ErrNoSuchWorker, job.JobType)
+	}
 
 	s.registry[job.JobID] = job
 
@@ -189,5 +200,8 @@ func (s *Scheduler) Wake() {
 }
 
 func (s *Scheduler) Register(pools ...pool.WorkerPooler){
-
+	for _, p := range pools{
+		p.SetOnDone(s.OnDone)
+		s.pools = append(s.pools, p)
+	}
 }

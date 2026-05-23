@@ -19,6 +19,7 @@ type Priority int
 
 type Item struct {
 	JobID      string
+	JobType string
 	Payload json.RawMessage
 	Priority   Priority
 	RunAt time.Time
