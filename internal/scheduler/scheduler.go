@@ -47,7 +47,9 @@ func NewScheduler(cfg *config.Config, options ...Option) *Scheduler {
 	if so.pool != nil {
         s.pool = so.pool
     } else {
+		// откуда взять jobtype?
         s.pool = pool.NewWorkerPool(cfg.PoolCfg,
+			jobtype,
             pool.WithExecutor(so.execute),
             pool.WithOnDone(s.OnDone),
             pool.WithOnError(so.onError),
@@ -184,4 +186,8 @@ func (s *Scheduler) Wake() {
 	case s.wakeChannel <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Scheduler) Register(pools ...pool.WorkerPooler){
+
 }

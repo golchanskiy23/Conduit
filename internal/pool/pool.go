@@ -27,7 +27,12 @@ type WorkerPool struct {
 	onError func(string, error)
 }
 
-func NewWorkerPool(cfg config.WorkerPoolConfig, options ...workerOption) *WorkerPool {
+type JobTyper interface{
+	Handles(jobType string) bool 
+	Execute(ctx context.Context, item *heap.Item) error
+}
+
+func NewWorkerPool(cfg config.WorkerPoolConfig, worker JobTyper, options ...workerOption) *WorkerPool {
 	opts := &workerPoolOptions{
         onError: func(id string, err error) {
             log.Printf("job %s error: %v", id, err)
@@ -112,4 +117,10 @@ func (pool *WorkerPool) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return fmt.Errorf("worker pool shutdown timeout: %w", ctx.Err())
 	}
+}
+
+func CreatePools(cfg config.WorkerPoolConfig , types []JobTyper, options [][]workerOption) []WorkerPooler{
+	for _, val 
+
+	return ans
 }

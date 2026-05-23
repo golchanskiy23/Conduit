@@ -37,9 +37,9 @@ func NewHTTPHandler(s Submitter, t time.Duration) *JobHandler {
 
 type EnqueueRequest struct {
 	Priority heap.Priority `json:"priority"`
-	Description string `json:"description"`
 	RunAt    time.Time         `json:"run_at"`
 	Deps     []string          `json:"deps"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 func generateJobID() (string, error) {
@@ -54,7 +54,7 @@ func generateJobID() (string, error) {
 func makeTTLKey(req *EnqueueRequest) string{
 	key := fmt.Sprintf("%d|%s|%v|%v|",
 		req.Priority, 
-		req.Description, 
+		req.Payload, 
 		req.RunAt.UTC().Format(time.RFC3339Nano),
 		strings.Join(req.Deps, ","),
 	)
@@ -77,7 +77,7 @@ func (h *JobHandler) EnqueueJob(w http.ResponseWriter, r *http.Request) {
 
 	job := &heap.Item{
 		JobID:    jobID,
-		Description: req.Description,
+		Payload: req.Payload,
 		Priority: req.Priority,
 		RunAt: req.RunAt,
 		EnqueuedAt: time.Now(),
