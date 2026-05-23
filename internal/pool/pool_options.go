@@ -1,32 +1,25 @@
 package pool
 
-import (
-	"conduit/internal/ds/queue/heap"
-	"context"
+import(
+    "conduit/pkg/retry"
 )
 
-type workerPoolOptions struct{
-	execute func(context.Context, *heap.Item) error
-	onDone func(string)
-	onError func(string, error)
-}
-
-type workerOption func(*workerPoolOptions)
-
-func WithExecutor(fn func(context.Context, *heap.Item) error) workerOption {
-    return func(o *workerPoolOptions) {
-        o.execute = fn
-    }
-}
+type workerOption func(*WorkerPool)
 
 func WithOnDone(fn func(string)) workerOption {
-    return func(o *workerPoolOptions) {
+    return func(o *WorkerPool) {
         o.onDone = fn
     }
 }
 
 func WithOnError(fn func(string, error)) workerOption {
-    return func(o *workerPoolOptions) {
+    return func(o *WorkerPool) {
         o.onError = fn
     }
+}
+
+func WithRetry(cfg retry.Config) workerOption {
+	return func(o *WorkerPool) {
+		o.retryCfg = &cfg
+	}
 }

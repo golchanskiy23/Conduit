@@ -14,18 +14,13 @@ const(
 	defaultWriteTimeout = 10
 	defaultIdleTimeout = 60
 	defaultShutdownTimeout = 15
-	
-	defaultBufferSize = 100
-	defaultJobTimeout = 30
-
-	defaultWorkersNum = 4
+	defaultExpiredTimeShutdown = 5
 )
 
 type Config struct{
 	Server HTTPServer `mapstructure:"server"`
-	PoolCfg WorkerPoolConfig `mapstructure:"poolcfg"`
-	// засунуть позже в app или poolcfg
-	WorkersNum int `mapstructure:"workers_num"`
+	PoolCfg []WorkerPoolConfig `mapstructure:"poolcfg"`
+	TTLMap TTLMapConfig `mapstructure:"ttlmap"`
 }
 
 type HTTPServer struct{
@@ -37,8 +32,29 @@ type HTTPServer struct{
 }
 
 type WorkerPoolConfig struct {
+	Worker string `mapstructure:"worker"`
+	WorkersNum int `mapstructure:"workers_num"`
 	BufferSize int `mapstructure:"buffer_size"`
 	JobTimeout time.Duration `mapstructure:"job_timeout"`
+	Retry      RetryConfig   `mapstructure:"retry"`
+	Limiter    LimiterConfig `mapstructure:"limiter"`
+}
+
+type RetryConfig struct {
+	MaxAttempts  int           `mapstructure:"max_attempts"`
+	InitialDelay time.Duration `mapstructure:"initial_delay"`
+	MaxDelay     time.Duration `mapstructure:"max_delay"`
+	Multiplier   float64       `mapstructure:"multiplier"`
+	Jitter       bool          `mapstructure:"jitter"`
+}
+
+type LimiterConfig struct {
+	Window   time.Duration `mapstructure:"window"`
+	MaxCount int           `mapstructure:"max_count"`
+}
+
+type TTLMapConfig struct{
+	ExpiredTimeShutdown time.Duration `mapstructure:"expired_time"`
 }
 
 func DefaultConfig() *Config {
@@ -50,11 +66,9 @@ func DefaultConfig() *Config {
 			IdleTimeout:     defaultIdleTimeout * time.Second,
 			ShutdownTimeout: defaultShutdownTimeout * time.Second,
 		},
-		PoolCfg: WorkerPoolConfig{
-			BufferSize: defaultBufferSize,
-			JobTimeout: defaultJobTimeout * time.Second,
+		TTLMap: TTLMapConfig{
+			ExpiredTimeShutdown: defaultExpiredTimeShutdown*time.Minute,
 		},
-		WorkersNum: defaultWorkersNum,
 	}
 }
 

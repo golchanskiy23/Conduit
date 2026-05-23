@@ -3,6 +3,7 @@ package pool
 import (
 	"conduit/internal/config"
 	"conduit/internal/ds/queue/heap"
+	"conduit/pkg/retry"
 	"context"
 	"fmt"
 	"log"
@@ -13,49 +14,59 @@ import (
 type WorkerPooler interface {
 	TryExecute(job *heap.Item) bool
 	Shutdown(ctx context.Context) error
-	Start(context.Context, int)
+	Start(context.Context)
+	Worker() Worker
+	SetOnDone(func(string))
 }
 
 type WorkerPool struct {
 	jobs    chan *heap.Item
 	wg      *sync.WaitGroup
 	cfg     config.WorkerPoolConfig
-	mu 		sync.RWMutex
+	mu      sync.RWMutex
+	worker  Worker
 	closed  atomic.Bool
-	execute func(context.Context, *heap.Item) error
 	onDone  func(string)
 	onError func(string, error)
+	// retryCfg — если не nil, каждый job выполняется через retry.Do.
+	retryCfg *retry.Config
 }
 
-func NewWorkerPool(cfg config.WorkerPoolConfig, options ...workerOption) *WorkerPool {
-	opts := &workerPoolOptions{
-        onError: func(id string, err error) {
-            log.Printf("job %s error: %v", id, err)
-        },
-    }
-
-	for _, opt := range options{
-		opt(opts)
+func NewWorkerPool(cfg config.WorkerPoolConfig, worker Worker, options ...workerOption) *WorkerPool {
+	p := &WorkerPool{
+		jobs:   make(chan *heap.Item, cfg.BufferSize),
+		cfg:    cfg,
+		wg:     &sync.WaitGroup{},
+		worker: worker,
+		onDone: func(string) {},
+		onError: func(id string, err error) {
+			log.Printf("job %s error: %v", id, err)
+		},
 	}
 
-	return &WorkerPool{
-        jobs:    make(chan *heap.Item, cfg.BufferSize),
-        cfg:     cfg,
-		wg:      &sync.WaitGroup{},
-        execute: opts.execute,
-        onDone:  opts.onDone,
-        onError: opts.onError,
-    }
+	for _, opt := range options {
+		opt(p)
+	}
+
+	return p
 }
 
-func (pool *WorkerPool) Start(ctx context.Context, n int) {
-	for i := 0; i < n; i++ {
+func (pool *WorkerPool) Worker() Worker {
+	return pool.worker
+}
+
+func (pool *WorkerPool) SetOnDone(fn func(string)) {
+	pool.onDone = fn
+}
+
+func (pool *WorkerPool) Start(ctx context.Context) {
+	for i := 0; i < pool.cfg.WorkersNum; i++ {
 		pool.wg.Add(1)
-		go pool.worker(ctx)
+		go pool.run(ctx)
 	}
 }
 
-func (pool *WorkerPool) worker(ctx context.Context) {
+func (pool *WorkerPool) run(ctx context.Context) {
 	defer pool.wg.Done()
 	for job := range pool.jobs {
 		func() {
@@ -64,9 +75,20 @@ func (pool *WorkerPool) worker(ctx context.Context) {
 					pool.onError(job.JobID, fmt.Errorf("panic: %v", r))
 				}
 			}()
+
 			jobCtx, cancel := context.WithTimeout(ctx, pool.cfg.JobTimeout)
 			defer cancel()
-			if err := pool.execute(jobCtx, job); err != nil {
+
+			var err error
+			if pool.retryCfg != nil {
+				err = retry.Do(jobCtx, func(ctx context.Context) error {
+					return pool.worker.Execute(ctx, job)
+				}, *pool.retryCfg)
+			} else {
+				err = pool.worker.Execute(jobCtx, job)
+			}
+
+			if err != nil {
 				pool.onError(job.JobID, err)
 				return
 			}
@@ -77,7 +99,7 @@ func (pool *WorkerPool) worker(ctx context.Context) {
 
 func (pool *WorkerPool) TryExecute(job *heap.Item) bool {
 	pool.mu.RLock()
-    defer pool.mu.RUnlock()
+	defer pool.mu.RUnlock()
 
 	if pool.closed.Load() {
 		return false
@@ -90,9 +112,9 @@ func (pool *WorkerPool) TryExecute(job *heap.Item) bool {
 	}
 }
 
-func (pool *WorkerPool) Shutdown(ctx context.Context) error {	
+func (pool *WorkerPool) Shutdown(ctx context.Context) error {
 	pool.mu.Lock()
-	if pool.closed.Swap(true){
+	if pool.closed.Swap(true) {
 		pool.mu.Unlock()
 		return nil
 	}

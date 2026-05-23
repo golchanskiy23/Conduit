@@ -3,6 +3,7 @@ package heap
 import (
 	"conduit/internal/ds/queue"
 	"container/heap"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -18,9 +19,12 @@ type Priority int
 
 type Item struct {
 	JobID      string
+	JobType string
+	Payload json.RawMessage
 	Priority   Priority
 	RunAt time.Time
 	EnqueuedAt time.Time
+
 	idx        int
 }
 
