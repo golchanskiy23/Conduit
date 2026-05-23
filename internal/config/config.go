@@ -36,6 +36,21 @@ type WorkerPoolConfig struct {
 	WorkersNum int `mapstructure:"workers_num"`
 	BufferSize int `mapstructure:"buffer_size"`
 	JobTimeout time.Duration `mapstructure:"job_timeout"`
+	Retry      RetryConfig   `mapstructure:"retry"`
+	Limiter    LimiterConfig `mapstructure:"limiter"`
+}
+
+type RetryConfig struct {
+	MaxAttempts  int           `mapstructure:"max_attempts"`
+	InitialDelay time.Duration `mapstructure:"initial_delay"`
+	MaxDelay     time.Duration `mapstructure:"max_delay"`
+	Multiplier   float64       `mapstructure:"multiplier"`
+	Jitter       bool          `mapstructure:"jitter"`
+}
+
+type LimiterConfig struct {
+	Window   time.Duration `mapstructure:"window"`
+	MaxCount int           `mapstructure:"max_count"`
 }
 
 type TTLMapConfig struct{

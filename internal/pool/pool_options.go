@@ -1,5 +1,9 @@
 package pool
 
+import(
+    "conduit/pkg/retry"
+)
+
 type workerOption func(*WorkerPool)
 
 func WithOnDone(fn func(string)) workerOption {
@@ -12,4 +16,10 @@ func WithOnError(fn func(string, error)) workerOption {
     return func(o *WorkerPool) {
         o.onError = fn
     }
+}
+
+func WithRetry(cfg retry.Config) workerOption {
+	return func(o *WorkerPool) {
+		o.retryCfg = &cfg
+	}
 }

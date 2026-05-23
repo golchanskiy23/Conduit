@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// testWorker — универсальный воркер для тестов
 type testWorker struct {
 	jobType string
 	fn      func(*heap.Item)
